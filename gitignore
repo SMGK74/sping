@@ -1,0 +1,21 @@
+# Dati generati a runtime (impostazioni, liste, log, lingue): specifici del PC/utente, non vanno versionati.
+# Creata accanto allo script se scrivibile, altrimenti sotto %APPDATA% (vedi README) - qui copre il primo caso.
+/SpingData/
+*.log
+/logs/
+settings.json
+lists.json
+
+# File temporanei Windows/PowerShell
+*.ps1xml.bak
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# File temporanei generici
+*.tmp
+*~
