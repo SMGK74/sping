@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.8.3 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.8.4 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -198,7 +198,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.8.3'
+$script:ScriptVersion = '2.8.4'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -688,7 +688,28 @@ if ($Protocol -ne 'Icmp') {
     Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
     $handler = New-Object System.Net.Http.HttpClientHandler
     if ($IgnoreCertificateErrors) {
-        $handler.ServerCertificateCustomValidationCallback = { $true }
+        # PROVATO con un test diagnostico dedicato (vedi CHANGELOG 2.5.9): un callback di validazione basato
+        # su scriptblock PowerShell, anche banale come "{ $true }", fallisce se invocato da .NET su un thread
+        # privo di Runspace ("There is no Runspace available to run scripts in this thread") - esattamente
+        # cio' che succede qui, dato che HttpClientHandler esegue l'handshake TLS su un thread di I/O in
+        # background. Soluzione: una vera classe .NET compilata con Add-Type (bytecode reale, nessuna
+        # dipendenza da Runspace) invece di uno scriptblock interpretato.
+        if (-not ('SpingCertBypass' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public static class SpingCertBypass
+{
+    public static bool AlwaysValid(HttpRequestMessage request, X509Certificate2 cert, X509Chain chain, SslPolicyErrors errors)
+    {
+        return true;
+    }
+}
+'@ -ErrorAction Stop
+        }
+        $handler.ServerCertificateCustomValidationCallback = [SpingCertBypass]::AlwaysValid
     }
     $script:HttpClient = New-Object System.Net.Http.HttpClient($handler)
     $script:HttpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMillis)

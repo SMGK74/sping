@@ -2,6 +2,16 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [Infrastruttura]
+
+### Aggiunto
+- GitHub Action con PSScriptAnalyzer (`.github/workflows/psscriptanalyzer.yml`): analisi statica automatica di `Sping.ps1` a ogni push/pull request su `main`. Fallisce solo su errori bloccanti, mostra gli avvisi come informativi; esclude `PSAvoidUsingWriteHost` (uso deliberato per la dashboard colorata in console). Badge di stato aggiunto in cima a entrambi i README.
+
+## [2.8.4]
+
+### Corretto
+- `-IgnoreCertificateErrors` per il monitoraggio HTTPS vero e proprio (non la sonda del certificato, già corretta in 2.5.9) usava lo stesso schema poi dimostrato rotto: uno scriptblock PowerShell come callback di validazione TLS, invocato da .NET su un thread privo di Runspace. Anche un semplice `{ $true }` è comunque codice PowerShell che richiede un Runspace per eseguire, quindi il bypass rischiava di fallire silenziosamente (o far fallire l'intera connessione) esattamente come il bug già diagnosticato per il certificato. Risolto compilando una vera classe .NET con `Add-Type` (bytecode reale, nessuna dipendenza da Runspace) al posto dello scriptblock.
+
 ## [2.8.3]
 
 ### Aggiunto

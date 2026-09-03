@@ -1,5 +1,7 @@
 *🇬🇧 English | [🇮🇹 Versione italiana](README.it.md)*
 
+[![PSScriptAnalyzer](https://github.com/SMGK74/sping/actions/workflows/psscriptanalyzer.yml/badge.svg)](https://github.com/SMGK74/sping/actions/workflows/psscriptanalyzer.yml)
+
 # Sping
 
 Parallel multi-host ping monitor for PowerShell — a modern rewrite of the old `Sping.vbs`.
