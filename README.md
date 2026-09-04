@@ -4,13 +4,13 @@
 
 # Sping
 
-Parallel multi-host ping monitor for PowerShell — a modern rewrite of the old `Sping.vbs`.
+Parallel multi-host ping monitor for PowerShell, a modern rewrite of the old `Sping.vbs`.
 
 Shows a live console dashboard (one fixed row per host, updated in place - no flicker, no scrolling), optionally writes a structured CSV log, and plays a sound/voice alert when a host that was down comes back up.
 
 ## History
 
-Sping started out as `Sping.vbs`, an old VBScript tool for pinging multiple hosts, with a sound alert on recovery and settings stored in the Windows Registry. This version is a full PowerShell rewrite that keeps the original goal — a simple, lightweight, dependency-free monitor — while iteratively adding: a live color-coded dashboard, CSV logging, portable JSON configuration, support for multiple protocols (ICMP, HTTP/HTTPS, TCP), jitter and TLS certificate expiry monitoring, UI localization, CIDR/range expansion, and automatic traceroute on failure. Developed with the assistance of Claude (Anthropic).
+Sping started out as `Sping.vbs`, an old VBScript tool for pinging multiple hosts, with a sound alert on recovery and settings stored in the Windows Registry. This version is a full PowerShell rewrite that keeps the original goal (a simple, lightweight, dependency-free monitor) while iteratively adding: a live color-coded dashboard, CSV logging, portable JSON configuration, support for multiple protocols (ICMP, HTTP/HTTPS, TCP), jitter and TLS certificate expiry monitoring, UI localization, CIDR/range expansion, and automatic traceroute on failure. Developed with the assistance of Claude (Anthropic).
 
 ## Requirements
 
@@ -72,7 +72,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-While monitoring: press `A` at any time to toggle the sound/voice alert on or off (status shown in the window title), or `Q`/`Ctrl+C` to stop cleanly — a final summary is always printed, with no terminating errors.
+While monitoring: press `A` at any time to toggle the sound/voice alert on or off (status shown in the window title), or `Q`/`Ctrl+C` to stop cleanly. A final summary is always printed, with no terminating errors.
 
 ## Main parameters
 
@@ -90,13 +90,13 @@ While monitoring: press `A` at any time to toggle the sound/voice alert on or of
 | `-Port` | Destination TCP port. Required with `-Protocol Tcp` |
 | `-IgnoreCertificateErrors` | Only with `-Protocol Https`: skips TLS certificate validation (useful for internal hosts with self-signed certificates) |
 | `-CertWarningDays` | Only with `-Protocol Https`: day threshold below which the STATUS column flags an upcoming certificate expiry (default 30) |
-| `-Language` | UI language: `en` or `it`. Default: auto-detected from the system's UI language on first run (Italian if the system is in Italian, English otherwise), then whatever was last saved. Customizable/extensible — see the Language section |
+| `-Language` | UI language: `en` or `it`. Default: auto-detected from the system's UI language on first run (Italian if the system is in Italian, English otherwise), then whatever was last saved. Customizable and extensible, see the Language section |
 | `-DisableAlerts` | Starts with the sound/voice alert disabled instead of the default enabled (can still be toggled live with the `A` key). Persist with `-SaveAsDefault` to always start disabled |
 | `-TimeToLive` | TTL of ping packets (`-Protocol Icmp` only) |
 | `-TimeoutMillis` | Timeout in ms to wait for each reply |
 | `-IntervalMillis` | Pause in ms between cycles. With `-Protocol Http`/`Https`/`Tcp` a minimum of 3000 ms is enforced, even if you request a lower value, to avoid resembling a flood/DDoS against the monitored hosts |
 | `-ResumeThreshold` | Consecutive failures after which the row switches from orange to red, and below which the sound alert fires on recovery |
-| `-Summary` | Compact grid instead of one row per host — see `-SummaryColumns` |
+| `-Summary` | Compact grid instead of one row per host, see `-SummaryColumns` |
 | `-SummaryColumns` | Only with `-Summary`: hosts per row in the compact grid (default 4) |
 | `-SoundFile` | WAV file played when a host recovers |
 | `-Log` / `-LogFile` | Enable CSV logging (default or custom path) |
@@ -108,12 +108,12 @@ While monitoring: press `A` at any time to toggle the sound/voice alert on or of
 
 Settings, host lists, logs and language files persist as JSON, no longer in the Windows Registry as in the original VBScript version. The storage folder is chosen automatically:
 
-1. **`SpingData` next to the script** (e.g. `C:\Tools\SpingData`), if that location is writable — making the whole `Sping` folder portable: copy it to another PC or a USB drive and settings/lists/logs travel along with the script.
+1. **`SpingData` next to the script** (e.g. `C:\Tools\SpingData`), if that location is writable. This makes the whole `Sping` folder portable: copy it to another PC or a USB drive and settings/lists/logs travel along with the script.
 2. **`%APPDATA%\SM-Script\Sping`** as a fallback, if the script is in a non-writable location (e.g. `Program Files` or a read-only share).
 
 ## Language
 
-The UI starts in Italian if the system is in Italian, otherwise in English (auto-detected on first run). Use `-Language it`/`-Language en` to force it explicitly. On first run, the script generates `en.json` and `it.json` under `SpingData\lang\`: edit them, or copy one as a base to create a new one (e.g. `fr.json` with the same keys) to add another language — then call it with `-Language fr`.
+The UI starts in Italian if the system is in Italian, otherwise in English (auto-detected on first run). Use `-Language it`/`-Language en` to force it explicitly. On first run, the script generates `en.json` and `it.json` under `SpingData\lang\`: edit them, or copy one as a base to create a new one (e.g. `fr.json` with the same keys) to add another language, then call it with `-Language fr`.
 
 ## Dashboard colors
 
@@ -124,7 +124,7 @@ The UI starts in Italian if the system is in Italian, otherwise in English (auto
 
 ## Jitter and certificate expiry
 
-- **JITTER(ms)**: a moving average of the variation between consecutive RTTs (same formula as RFC 3550/1889), shown in the dashboard and the final summary — useful for spotting unstable links even when packet loss is low.
+- **JITTER(ms)**: a moving average of the variation between consecutive RTTs (same formula as RFC 3550/1889), shown in the dashboard and the final summary. Useful for spotting unstable links even when packet loss is low.
 - **Certificate expiry** (`-Protocol Https`): at startup, once per host (not every cycle, to avoid adding load beyond the monitoring itself), the TLS certificate's expiry date is read. The CERT(d) column shows the remaining days (negative if already expired), with a `!` when it falls within `-CertWarningDays` days (default 30).
 
 ## Console compatibility notes

@@ -4,13 +4,13 @@
 
 # Sping
 
-Monitor di ping multi-host in parallelo per PowerShell — riscrittura moderna del vecchio `Sping.vbs`.
+Monitor di ping multi-host in parallelo per PowerShell, riscrittura moderna del vecchio `Sping.vbs`.
 
 Mostra una dashboard live in console (una riga fissa per host, aggiornata sul posto senza flicker né scroll), scrive opzionalmente un log CSV strutturato, e riproduce un allarme sonoro/vocale quando un host torna raggiungibile dopo un'interruzione.
 
 ## Storia
 
-Sping nasce come `Sping.vbs`, un vecchio script VBScript per il monitoraggio ping di più host, con allarme sonoro al ripristino e impostazioni salvate nel registro di Windows. Questa versione è una riscrittura completa in PowerShell che ne mantiene lo scopo originale — un monitor semplice, leggero, senza dipendenze esterne — aggiungendo via via, in modo iterativo: la dashboard live a colori, il log CSV, la configurazione portabile in JSON, il supporto a più protocolli (ICMP, HTTP/HTTPS, TCP), il controllo di jitter e scadenza certificati TLS, la localizzazione dell'interfaccia, l'espansione di range/CIDR e il traceroute automatico sui fallimenti. Sviluppato con l'assistenza di Claude (Anthropic).
+Sping nasce come `Sping.vbs`, un vecchio script VBScript per il monitoraggio ping di più host, con allarme sonoro al ripristino e impostazioni salvate nel registro di Windows. Questa versione è una riscrittura completa in PowerShell che ne mantiene lo scopo originale (un monitor semplice, leggero, senza dipendenze esterne) aggiungendo via via, in modo iterativo: la dashboard live a colori, il log CSV, la configurazione portabile in JSON, il supporto a più protocolli (ICMP, HTTP/HTTPS, TCP), il controllo di jitter e scadenza certificati TLS, la localizzazione dell'interfaccia, l'espansione di range/CIDR e il traceroute automatico sui fallimenti. Sviluppato con l'assistenza di Claude (Anthropic).
 
 ## Requisiti
 
@@ -72,7 +72,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare l'allarme sonoro/vocale (lo stato è visibile nel titolo della finestra), oppure `Q`/`Ctrl+C` per interrompere in modo pulito — viene sempre stampato un riepilogo finale, senza errori di terminazione.
+Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare l'allarme sonoro/vocale (lo stato è visibile nel titolo della finestra), oppure `Q`/`Ctrl+C` per interrompere in modo pulito. Viene sempre stampato un riepilogo finale, senza errori di terminazione.
 
 ## Parametri principali
 
@@ -90,13 +90,13 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-Port` | Porta TCP di destinazione. Obbligatorio con `-Protocol Tcp` |
 | `-IgnoreCertificateErrors` | Solo con `-Protocol Https`: salta la validazione del certificato TLS (utile per host interni con certificati self-signed) |
 | `-CertWarningDays` | Solo con `-Protocol Https`: soglia in giorni sotto la quale la colonna STATO segnala che il certificato sta per scadere (default 30) |
-| `-Language` | Lingua dell'interfaccia: `en` o `it`. Default: rilevata automaticamente dalla lingua di sistema al primo avvio (italiano se il sistema è in italiano, altrimenti inglese), poi quella salvata l'ultima volta. Personalizzabile/estendibile — vedi sezione Lingua |
+| `-Language` | Lingua dell'interfaccia: `en` o `it`. Default: rilevata automaticamente dalla lingua di sistema al primo avvio (italiano se il sistema è in italiano, altrimenti inglese), poi quella salvata l'ultima volta. Personalizzabile ed estendibile, vedi sezione Lingua |
 | `-DisableAlerts` | Parte con l'allarme sonoro/vocale disattivato invece che attivo di default (resta comunque attivabile/disattivabile al volo col tasto `A`). Persistibile con `-SaveAsDefault` per partire sempre disattivato |
 | `-TimeToLive` | TTL dei pacchetti ping (solo `-Protocol Icmp`) |
 | `-TimeoutMillis` | Timeout in ms per ogni risposta |
 | `-IntervalMillis` | Pausa in ms tra un ciclo e l'altro. Con `-Protocol Http`/`Https`/`Tcp` viene imposto un minimo di 3000 ms, anche se richiedi un valore più basso, per non rischiare di sembrare un flood/DDoS verso gli host monitorati |
 | `-ResumeThreshold` | Fallimenti consecutivi da cui la riga passa da arancione a rosso, e sotto cui scatta l'allarme sonoro al ripristino |
-| `-Summary` | Griglia compatta invece di una riga per host — vedi `-SummaryColumns` |
+| `-Summary` | Griglia compatta invece di una riga per host, vedi `-SummaryColumns` |
 | `-SummaryColumns` | Solo con `-Summary`: numero di host per riga nella griglia compatta (default 4) |
 | `-SoundFile` | WAV riprodotto al ripristino di un host |
 | `-Log` / `-LogFile` | Abilita il logging CSV (default o percorso custom) |
@@ -108,12 +108,12 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 
 Impostazioni, liste host, log e file di lingua persistono come JSON, non più nel registro di Windows come nella versione VBScript originale. La cartella dove vengono salvati è scelta automaticamente:
 
-1. **`SpingData` accanto allo script** (es. `C:\Tools\SpingData`), se quella posizione è scrivibile — così l'intera cartella `Sping` è portabile: copiala su un altro PC o su una chiavetta e impostazioni/liste/log viaggiano insieme allo script.
+1. **`SpingData` accanto allo script** (es. `C:\Tools\SpingData`), se quella posizione è scrivibile. Così l'intera cartella `Sping` è portabile: copiala su un altro PC o su una chiavetta e impostazioni/liste/log viaggiano insieme allo script.
 2. **`%APPDATA%\SM-Script\Sping`** come ripiego, se lo script si trova in un percorso non scrivibile (es. `Program Files` o una condivisione in sola lettura).
 
 ## Lingua
 
-L'interfaccia parte in italiano se il sistema è in italiano, altrimenti in inglese (rilevato automaticamente al primo avvio). Con `-Language it`/`-Language en` puoi forzarla esplicitamente. Al primo avvio, lo script genera i file `en.json` e `it.json` dentro `SpingData\lang\`: puoi modificarli, oppure copiarne uno come base e crearne uno nuovo (es. `fr.json` con le stesse chiavi) per aggiungere un'altra lingua — basta poi richiamarlo con `-Language fr`.
+L'interfaccia parte in italiano se il sistema è in italiano, altrimenti in inglese (rilevato automaticamente al primo avvio). Con `-Language it`/`-Language en` puoi forzarla esplicitamente. Al primo avvio, lo script genera i file `en.json` e `it.json` dentro `SpingData\lang\`: puoi modificarli, oppure copiarne uno come base e crearne uno nuovo (es. `fr.json` con le stesse chiavi) per aggiungere un'altra lingua, basta poi richiamarlo con `-Language fr`.
 
 ## Colori dashboard
 
@@ -124,7 +124,7 @@ L'interfaccia parte in italiano se il sistema è in italiano, altrimenti in ingl
 
 ## Jitter e scadenza certificato
 
-- **JITTER(ms)**: media mobile della variazione tra RTT consecutivi (stessa formula di RFC 3550/1889), visibile in dashboard e nel riepilogo finale — utile per individuare collegamenti instabili anche quando la perdita pacchetti è bassa.
+- **JITTER(ms)**: media mobile della variazione tra RTT consecutivi (stessa formula di RFC 3550/1889), visibile in dashboard e nel riepilogo finale. Utile per individuare collegamenti instabili anche quando la perdita pacchetti è bassa.
 - **Scadenza certificato** (`-Protocol Https`): all'avvio, una sola volta per host (non ad ogni ciclo, per non aggiungere carico oltre al monitoraggio stesso), viene letta la data di scadenza del certificato TLS. La colonna CERT(gg) mostra i giorni rimanenti (negativo se già scaduto), con un `!` quando rientra entro `-CertWarningDays` giorni (default 30).
 
 ## Note di compatibilità console
@@ -133,4 +133,4 @@ Su console con buffer verticale ridotto (tipico di "Windows PowerShell" classica
 
 ## Changelog
 
-Vedi [CHANGELOG.md](CHANGELOG.md).
+Vedi [CHANGELOG.it.md](CHANGELOG.it.md).

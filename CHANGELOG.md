@@ -1,147 +1,149 @@
 # Changelog
 
-Tutte le modifiche rilevanti al progetto sono documentate in questo file.
+*English | [Versione italiana](CHANGELOG.it.md)*
 
-## [Infrastruttura]
+All notable changes to this project are documented in this file.
 
-### Aggiunto
-- GitHub Action con PSScriptAnalyzer (`.github/workflows/psscriptanalyzer.yml`): analisi statica automatica di `Sping.ps1` a ogni push/pull request su `main`. Fallisce solo su errori bloccanti, mostra gli avvisi come informativi; esclude `PSAvoidUsingWriteHost` (uso deliberato per la dashboard colorata in console). Badge di stato aggiunto in cima a entrambi i README.
+## [Infrastructure]
+
+### Added
+- GitHub Action with PSScriptAnalyzer (`.github/workflows/psscriptanalyzer.yml`): automatic static analysis of `Sping.ps1` on every push/pull request to `main`. Fails only on blocking errors, shows warnings as informational; excludes `PSAvoidUsingWriteHost` (deliberate choice for the color-coded console dashboard). Status badge added at the top of both READMEs.
 
 ## [2.8.4]
 
-### Corretto
-- `-IgnoreCertificateErrors` per il monitoraggio HTTPS vero e proprio (non la sonda del certificato, già corretta in 2.5.9) usava lo stesso schema poi dimostrato rotto: uno scriptblock PowerShell come callback di validazione TLS, invocato da .NET su un thread privo di Runspace. Anche un semplice `{ $true }` è comunque codice PowerShell che richiede un Runspace per eseguire, quindi il bypass rischiava di fallire silenziosamente (o far fallire l'intera connessione) esattamente come il bug già diagnosticato per il certificato. Risolto compilando una vera classe .NET con `Add-Type` (bytecode reale, nessuna dipendenza da Runspace) al posto dello scriptblock.
+### Fixed
+- `-IgnoreCertificateErrors` for the actual HTTPS monitoring (not the certificate probe, already fixed in 2.5.9) used the same pattern later proven broken: a PowerShell scriptblock as a TLS validation callback, invoked by .NET on a thread with no Runspace. Even a simple `{ $true }` is still PowerShell code that needs a Runspace to run, so the bypass risked failing silently (or breaking the whole connection) exactly like the bug already diagnosed for the certificate. Fixed by compiling a real .NET class with `Add-Type` (actual bytecode, no Runspace dependency) instead of the scriptblock.
 
 ## [2.8.3]
 
-### Aggiunto
-- Con più di 40 host in modalità completa (senza `-Summary` già specificato), lo script ora chiede interattivamente se passare a `-Summary` invece di limitarsi ad avvisare. Basta premere Invio o rispondere "no" per restare in modalità completa.
+### Added
+- With more than 40 hosts in full dashboard mode (and `-Summary` not already specified), the script now asks interactively whether to switch to `-Summary` instead of just showing a warning. Press Enter or answer "no" to stay in full mode.
 
 ## [2.8.2]
 
-### Corretto
-- L'avviso "troppi host, valuta -Summary" (introdotto in 2.8.1) non si vedeva mai con molti host, perché veniva stampato prima delle centinaia di righe host, finendo fuori vista quando la console scorreva per stamparle. Ora è stampato dopo, restando l'ultima riga visibile (le righe della dashboard, una volta create, si aggiornano per posizione e non ne vengono aggiunte altre).
+### Fixed
+- The "too many hosts, consider -Summary" warning (introduced in 2.8.1) was never actually visible with many hosts, because it was printed before the hundreds of host rows, ending up out of view once the console scrolled to print them all. It is now printed afterward, staying as the last visible line (dashboard rows, once created, update in place and no new ones are appended).
 
-### Aggiunto
-- Parametro `-SummaryColumns` (default 4): numero di host per riga nella griglia compatta di `-Summary`, prima fisso. Persistibile con `-SaveAsDefault`.
+### Added
+- `-SummaryColumns` parameter (default 4): number of hosts per row in the `-Summary` compact grid, previously fixed. Persisted with `-SaveAsDefault`.
 
 ## [2.8.1]
 
-### Aggiunto
-- Parametri `-TraceCooldownMinutes` (default 10) e `-MaxConcurrentTraces` (default 5) per `-TraceOnFailure`: evitano di ritracciare un host che flappa troppo di frequente e di esaurire le risorse di sistema quando molti host cadono insieme (es. un range CIDR ampio). I traceroute in eccesso vengono saltati, non accodati.
-- Avviso live sulla riga 1 della dashboard (solo modalità completa, non `-Summary`) che mostra l'ultimo traceroute avviato o saltato e il motivo.
-- Avviso quando si monitorano più di 40 host in modalità dashboard completa, suggerendo `-Summary` per una vista più compatta - utile in particolare con range/CIDR ampi (es. un `/24`).
+### Added
+- `-TraceCooldownMinutes` (default 10) and `-MaxConcurrentTraces` (default 5) parameters for `-TraceOnFailure`: prevent re-tracing a flapping host too often and exhausting system resources when many hosts go down together (e.g. a broad CIDR range). Excess traceroutes are skipped, not queued.
+- Live notice on dashboard row 1 (full mode only, not `-Summary`) showing the latest traceroute started or skipped, with the reason.
+- Warning when monitoring more than 40 hosts in full dashboard mode, suggesting `-Summary` for a more compact view. Particularly useful with broad ranges/CIDRs (e.g. a `/24`).
 
-### Modificato
-- Margine di sicurezza sull'altezza del buffer console aumentato, per maggiore tranquillità con conteggi host elevati.
+### Changed
+- Increased safety margin on the console buffer height, for extra peace of mind with high host counts.
 
 ## [2.8.0]
 
-### Aggiunto
-- La lingua di default ora viene rilevata automaticamente dalla cultura UI di sistema al primo avvio (italiano se il sistema è in italiano, altrimenti inglese), invece di partire sempre in inglese. Il rilevamento vale solo alla creazione iniziale delle impostazioni: una volta salvata una scelta (esplicita o tramite `-SaveAsDefault`), quella resta autorevole.
-- Parametro `-DisableAlerts`: avvia con l'allarme sonoro/vocale disattivato invece che attivo di default, persistibile con `-SaveAsDefault`. Resta comunque disponibile il toggle live col tasto `A` durante il monitoraggio.
+### Added
+- The default language is now auto-detected from the system's UI culture on first run (Italian if the system is in Italian, English otherwise), instead of always starting in English. Detection only applies when settings are first created; once a choice is saved (explicit or via `-SaveAsDefault`), that choice is authoritative.
+- `-DisableAlerts` parameter: starts with the sound/voice alert disabled instead of enabled by default, persisted with `-SaveAsDefault`. The live toggle with the `A` key during monitoring is still available.
 
 ## [2.7.0]
 
-### Aggiunto
-- Parametro `-TraceOnFailure`: quando un host passa da raggiungibile a non raggiungibile (o TTL scaduto), avvia `tracert` per quell'host come processo indipendente in background, con l'output salvato in un file con timestamp sotto `SpingData\traces`. Scatta una volta per episodio di down (transizione 0→1 fallimenti consecutivi), non ad ogni ciclo fallito, e non blocca in alcun modo la dashboard - nessuna cattura/interpretazione dell'output in tempo reale, l'utente legge il file quando gli serve. I file generati durante la sessione sono elencati nel riepilogo finale.
+### Added
+- `-TraceOnFailure` parameter: when a host goes from reachable to unreachable (or TTL expired), runs `tracert` for that host as an independent background process, saving its output to a timestamped file under `SpingData\traces`. Fires once per down episode (0 to 1 consecutive-failure transition), not on every failed cycle, and does not block the dashboard in any way. No real-time output capture or parsing; the user reads the file when needed. Files generated during the session are listed in the final summary.
 
 ## [2.6.0]
 
-### Aggiunto
-- Ogni host in `-ComputerName` (o in una lista salvata) può ora essere un range/CIDR/subnet mask invece di un singolo indirizzo, espanso automaticamente in più host: `10.0.0.0/23`, `10.0.0.0/255.255.254.0`, `10.0.0.1-10.0.0.50`, o la scorciatoia `10.0.0.1-50` (solo ultimo ottetto). Network e broadcast esclusi automaticamente (eccetto /31 e /32). Deduplica automatica se un host compare sia esplicitamente sia dentro un range.
-- Parametro `-MaxRangeHosts` (default 1024): limite di sicurezza sul numero di host generabili da un singolo range/CIDR, per evitare di monitorare per errore migliaia di host da un range troppo ampio.
+### Added
+- Each host in `-ComputerName` (or in a saved list) can now be a range/CIDR/subnet mask instead of a single address, automatically expanded into multiple hosts: `10.0.0.0/23`, `10.0.0.0/255.255.254.0`, `10.0.0.1-10.0.0.50`, or the shorthand `10.0.0.1-50` (last octet only). Network and broadcast addresses are excluded automatically (except for /31 and /32). Automatic deduplication if a host appears both explicitly and inside a range.
+- `-MaxRangeHosts` parameter (default 1024): safety cap on how many hosts a single range/CIDR can generate, to avoid accidentally monitoring thousands of hosts from an overly broad range.
 
-### Rimosso
-- Tolto il blocco diagnostico temporaneo per la colonna CERT(gg) (introdotto in 2.5.5, non più necessario dopo la correzione definitiva in 2.5.9).
+### Removed
+- Removed the temporary diagnostic block for the CERT(d) column (introduced in 2.5.5, no longer needed after the definitive fix in 2.5.9).
 
 ## [2.5.8]
 
-### Modificato
-- La colonna CERT(gg) ora compare solo con `-Protocol Https`, invece di essere sempre presente con un `-` per ICMP/HTTP/TCP dove non ha senso.
+### Changed
+- The CERT(d) column now only appears with `-Protocol Https`, instead of always being present with a `-` for ICMP/HTTP/TCP where it doesn't apply.
 
-## [2.5.5]–[2.5.7]
+## [2.5.5] - [2.5.7]
 
-### Corretto
-- Diagnosi e correzione, in più passaggi, della colonna CERT(gg) rimasta sempre vuota: causa finale identificata in una connessione TLS riusata dal pool del processo PowerShell (da un lancio precedente dello script), che impediva alla validazione del certificato — e quindi al nostro punto di lettura — di scattare di nuovo. Risolto forzando una connessione nuova (`KeepAlive = $false`) per la sonda dedicata, e catturando il certificato direttamente dal callback di validazione di `ServicePointManager` invece che dalla proprietà `ServicePoint.Certificate` (nota per essere inaffidabile in .NET Framework).
+### Fixed
+- Multi-step diagnosis and fix for the CERT(d) column staying empty: the root cause was ultimately identified as a TLS connection reused from the PowerShell process's connection pool (from a previous run of the script), which prevented certificate validation, and therefore our reading point, from firing again. Fixed by forcing a fresh connection (`KeepAlive = $false`) for the dedicated probe, and capturing the certificate directly from `ServicePointManager`'s validation callback instead of the `ServicePoint.Certificate` property (known to be unreliable in .NET Framework).
 
 ## [2.5.4]
 
-### Corretto
-- Colonna CERT(gg) ancora sempre `-` con monitoraggio HTTPS funzionante: la sonda apriva una connessione nuova "fredda" (handshake TCP+TLS completo) ma con lo stesso timeout stretto usato per il monitoraggio (che invece riusa connessioni gia' aperte), risultando probabilmente troppo corta su reti con latenza/ispezione significativa. Ora la sonda usa un timeout dedicato, molto piu' ampio (dato che gira una sola volta all'avvio). Aggiunto anche un fallback via `ServicePointManager.FindServicePoint` per gli scenari con proxy in cui `req.ServicePoint` potrebbe non essere l'oggetto realmente usato per la connessione.
+### Fixed
+- CERT(d) column still always `-` even with working HTTPS monitoring: the probe opened a fresh "cold" connection (full TCP+TLS handshake) but with the same tight timeout used for monitoring (which instead reuses already-open connections), likely too short on networks with significant latency or inspection. The probe now uses a dedicated, much larger timeout (since it only runs once at startup). Also added a fallback via `ServicePointManager.FindServicePoint` for proxy scenarios where `req.ServicePoint` might not be the object actually used for the connection.
 
 ## [2.5.3]
 
-### Corretto
-- **Regressione critica introdotta in 2.5.2**: agganciare la cattura della scadenza certificato al callback di validazione TLS delle richieste HTTPS del monitoraggio (invocato da .NET su un thread di I/O in background) poteva far fallire l'intera connessione HTTPS ("The SSL connection could not be established"), rompendo il monitoraggio vero e proprio. Rimosso quel meccanismo.
-- La lettura della scadenza certificato torna a essere una chiamata separata e isolata (un suo eventuale fallimento non tocca il monitoraggio), ora basata su `HttpWebRequest`/`ServicePoint` invece della connessione TLS grezza di 2.5.0/2.5.1: rispetta automaticamente proxy e percorso di rete come il monitoraggio HTTPS reale, risolvendo il problema per cui la colonna CERT(gg) restava sempre `-` anche con host raggiungibili.
+### Fixed
+- **Critical regression introduced in 2.5.2**: hooking certificate-expiry capture into the TLS validation callback of the monitoring's HTTPS requests (invoked by .NET on a background I/O thread) could make the whole HTTPS connection fail ("The SSL connection could not be established"), breaking the actual monitoring. That mechanism was removed.
+- Reading the certificate expiry is once again a separate, isolated call (a failure there does not affect monitoring), now based on `HttpWebRequest`/`ServicePoint` instead of the raw TLS connection from 2.5.0/2.5.1: it automatically respects proxy and network path like the real HTTPS monitoring, fixing the issue where the CERT(d) column stayed `-` even with reachable hosts.
 
 ## [2.5.2]
 
-### Corretto
-- La colonna CERT(gg) mostrava sempre `-` anche con `-Protocol Https` funzionante (200 OK): la sonda dedicata apriva una connessione TLS grezza separata (`TcpClient`+`SslStream`), che in alcuni ambienti di rete (proxy aziendale non attraversato da una connessione diretta, ispezione TLS del firewall, timeout troppo stretto) falliva silenziosamente anche quando il monitoraggio HTTPS vero e proprio funzionava. Risolto catturando la scadenza del certificato direttamente dalle richieste HTTPS del monitoraggio già funzionanti (stesso `HttpClient`, stesso percorso di rete), invece di aprire una connessione aggiuntiva.
+### Fixed
+- The CERT(d) column always showed `-` even with `-Protocol Https` working (200 OK): the dedicated probe opened a separate raw TLS connection (`TcpClient`+`SslStream`), which in some network environments (a corporate proxy not traversed by a direct connection, firewall TLS inspection, too tight a timeout) failed silently even when the actual HTTPS monitoring worked fine. Fixed by capturing the certificate expiry directly from the monitoring's already-working HTTPS requests (same `HttpClient`, same network path), instead of opening an extra connection.
 
 ## [2.5.1]
 
-### Modificato
-- La scadenza del certificato TLS (`-Protocol Https`) ora ha una colonna dedicata CERT(gg) in dashboard e nel riepilogo finale, sempre visibile (mostra `-` per gli altri protocolli), invece di un suffisso testuale appiccicato a STATO solo quando in prossimità della scadenza. Un `!` segnala quando si rientra entro `-CertWarningDays` giorni.
+### Changed
+- TLS certificate expiry (`-Protocol Https`) now has a dedicated CERT(d) column in the dashboard and final summary, always visible (shows `-` for other protocols), instead of a text suffix appended to STATUS only when close to expiry. A `!` flags when it falls within `-CertWarningDays` days.
 
 ## [2.5.0]
 
-### Aggiunto
-- Nuovo `-Protocol Tcp` con parametro `-Port` obbligatorio: verifica se una porta TCP specifica accetta connessioni, invece di un ping ICMP o una richiesta web.
-- Controllo scadenza certificato TLS con `-Protocol Https`: letto una sola volta all'avvio per host (non ad ogni ciclo, per non aggiungere carico), la colonna STATO segnala quando la scadenza rientra entro `-CertWarningDays` giorni (default 30) o è già passata.
-- Colonna JITTER(ms) in dashboard e nel riepilogo finale, calcolata con la stessa formula di RFC 3550/1889 (media mobile della variazione tra RTT consecutivi).
-- La pausa minima di sicurezza contro comportamenti simili a un flood/DDoS (introdotta in 2.3.1 per Http/Https) si applica ora anche a `-Protocol Tcp`.
+### Added
+- New `-Protocol Tcp` with a required `-Port` parameter: checks whether a specific TCP port accepts connections, instead of an ICMP ping or a web request.
+- TLS certificate expiry check with `-Protocol Https`: read once at startup per host (not every cycle, to avoid adding load), the STATUS column flags when expiry falls within `-CertWarningDays` days (default 30) or has already passed.
+- JITTER(ms) column in the dashboard and final summary, calculated with the same formula as RFC 3550/1889 (moving average of the variation between consecutive RTTs).
+- The minimum safety pause against flood/DDoS-like behavior (introduced in 2.3.1 for Http/Https) now also applies to `-Protocol Tcp`.
 
 ## [2.4.0]
 
-### Aggiunto
-- Colonna RICEVUTI nella dashboard live (prima presente solo nel riepilogo finale).
-- Localizzazione dell'interfaccia tramite file JSON esterni: inglese di default, italiano selezionabile con `-Language it`, estendibile ad altre lingue copiando `SpingData\lang\en.json` come base per un nuovo `<codice>.json`.
-- Percorso dati (impostazioni, liste, log, lingue) rilevato automaticamente: `SpingData` accanto allo script se scrivibile (per una cartella davvero portabile), altrimenti `%APPDATA%\SM-Script\Sping` come ripiego.
-- Parametro `-Language`, persistibile con `-SaveAsDefault` come gli altri parametri comportamentali.
+### Added
+- RECEIVED column in the live dashboard (previously only in the final summary).
+- UI localization via external JSON files: English by default, Italian selectable with `-Language it`, extensible to other languages by copying `SpingData\lang\en.json` as a base for a new `<code>.json`.
+- Data path (settings, lists, logs, languages) auto-detected: `SpingData` next to the script if writable (for a truly portable folder), otherwise `%APPDATA%\SM-Script\Sping` as a fallback.
+- `-Language` parameter, persisted with `-SaveAsDefault` like the other behavioral parameters.
 
 ## [2.3.1]
 
-### Aggiunto
-- Intervallo minimo di 3000 ms imposto automaticamente con `-Protocol Http`/`Https` (anche se se ne richiede uno più basso, con avviso esplicito), per non rischiare che il monitoraggio assomigli a un flood/DDoS verso gli host controllati: una richiesta HTTP/HTTPS è molto più onerosa di un ping ICMP.
+### Added
+- Minimum interval of 3000 ms automatically enforced with `-Protocol Http`/`Https` (even if a lower one is requested, with an explicit warning), to avoid the monitoring resembling a flood/DDoS against the checked hosts: an HTTP/HTTPS request is far heavier than an ICMP ping.
 
 ## [2.3.0]
 
-### Aggiunto
-- Tasto `A` durante il monitoraggio per attivare/disattivare l'allarme sonoro/vocale al volo, senza fermare lo script. Lo stato (ON/OFF) è visibile nel titolo della finestra della console.
-- Parametro `-Protocol` (`Icmp` di default, `Http`, `Https`): con Http/Https ogni ciclo invia una richiesta web asincrona parallela a ogni host invece di un ping ICMP — successo su codice di stato 2xx/3xx, RTT(ms) è la latenza di risposta completa, STATO mostra il codice (o il motivo dell'errore/timeout).
-- Parametro `-IgnoreCertificateErrors` (solo con `-Protocol Https`) per saltare la validazione del certificato TLS, utile per host interni con certificati self-signed.
-- `Protocol` persistito tra le impostazioni salvabili con `-SaveAsDefault` e mostrato da `-ShowSettings`.
+### Added
+- `A` key during monitoring to toggle the sound/voice alert on the fly, without stopping the script. Status (ON/OFF) shown in the console window title.
+- `-Protocol` parameter (`Icmp` by default, `Http`, `Https`): with Http/Https each cycle sends a parallel async web request to every host instead of an ICMP ping. Success on a 2xx/3xx status code, RTT(ms) is the full response latency, STATUS shows the code (or the error/timeout reason).
+- `-IgnoreCertificateErrors` parameter (only with `-Protocol Https`) to skip TLS certificate validation, useful for internal hosts with self-signed certificates.
+- `Protocol` persisted among the settings savable with `-SaveAsDefault` and shown by `-ShowSettings`.
 
 ## [2.2.0]
 
-### Aggiunto
-- Riscrittura completa da VBScript a PowerShell.
-- Ping parallelo di tutti gli host ad ogni ciclo tramite `System.Net.NetworkInformation.Ping` asincrono (al posto di WMI).
-- Dashboard live in console: una riga fissa per host, aggiornata sul posto senza flicker né scroll.
-- Modalità `-Summary`: riga compatta unica con simboli per host (`!!` successo, `TX` TTL Expired, `..` altro fallimento).
-- Log CSV opzionale (`-Log` / `-LogFile`), disattivato di default, file aperto una sola volta all'avvio.
-- Allarme sonoro/vocale (WAV + sintesi vocale, con fallback a beep) al ripristino di un host dopo la soglia di fallimenti consecutivi.
-- Impostazioni e liste host salvate come JSON in `%APPDATA%\SM-Script\Sping`, non più nel registro.
-- Gestione pulita dell'interruzione (`Q` o `Ctrl+C`), con riepilogo finale sempre stampato.
-- Help completo via comment-based help (`-Help` o nessun parametro).
-- Colori per riga nella dashboard: verde (successo), arancione (fallimento sotto soglia), rosso (fallimento da soglia `-ResumeThreshold` in su), giallo (FQDN non risolto, priorità massima). Applicati anche ai simboli della modalità `-Summary` e al riepilogo finale.
-- Risoluzione DNS indipendente e asincrona ad ogni ciclo (parallela al ping), cosi' la colonna IP riflette sempre la risoluzione corrente anche se la cache DNS scade o il record cambia.
-- Larghezza della colonna host calcolata dinamicamente sul nome più lungo tra quelli monitorati, per non sfasare le colonne successive con FQDN lunghi.
-- Riepilogo finale riformattato con le stesse intestazioni/colori/larghezza colonna della dashboard live, al posto della tabella generica di PowerShell.
+### Added
+- Full rewrite from VBScript to PowerShell.
+- Parallel ping of all hosts every cycle via async `System.Net.NetworkInformation.Ping` (instead of WMI).
+- Live console dashboard: one fixed row per host, updated in place with no flicker or scrolling.
+- `-Summary` mode: a single compact row with symbols per host (`!!` success, `TX` TTL Expired, `..` other failure).
+- Optional CSV log (`-Log` / `-LogFile`), disabled by default, file opened only once at startup.
+- Sound/voice alert (WAV + speech synthesis, falling back to beeps) when a host recovers past the consecutive-failure threshold.
+- Settings and host lists saved as JSON in `%APPDATA%\SM-Script\Sping`, no longer in the registry.
+- Clean interruption handling (`Q` or `Ctrl+C`), with a final summary always printed.
+- Full help via comment-based help (`-Help` or no parameters).
+- Per-row dashboard colors: green (success), orange (failure below threshold), red (failure at or above `-ResumeThreshold`), yellow (FQDN not resolving, highest priority). Also applied to `-Summary` symbols and the final summary.
+- Independent, async DNS resolution every cycle (parallel to the ping), so the IP column always reflects current resolution even if the DNS cache expires or the record changes.
+- Host column width calculated dynamically on the longest monitored name, so long FQDNs don't misalign the following columns.
+- Final summary reformatted with the same headers, colors, and column widths as the live dashboard, instead of PowerShell's generic table.
 
-### Corretto
-- Binding di più host posizionali (`ValueFromRemainingArguments`) che falliva con più di un argomento posizionale.
-- Colonna IP che mostrava `0.0.0.0` sui timeout invece di conservare l'ultimo IP valido.
-- Righe della dashboard che non si aggiornavano tutte (solo l'ultima) per una race condition nella lettura ripetuta di `CursorTop` su Windows Terminal/ConPTY — risolto con una singola lettura iniziale e offset aritmetici per riga.
-- Word-wrap di intestazione/righe più larghe della finestra che sfasava gli indici di riga e causava crash su `SetCursorPosition` — risolto troncando/riempiendo ogni riga alla larghezza console.
-- Righe duplicate/crash dopo esecuzioni ripetute dovuti a scroll del buffer da contenuto precedente — risolto con `Clear-Host` a inizio di ogni sessione di monitoraggio.
-- Banner con la versione dello script che spariva perché stampato prima del `Clear-Host` — ora ristampato subito dopo.
-- Errore visibile in console quando un FQDN non risolveva, causato da `Task.WaitAll` che rilanciava l'eccezione aggregata prima della gestione prevista — risolto attendendo il completamento dei task senza propagare l'eccezione a quel punto.
-- Dashboard "sballata" su console con buffer verticale ridotto (es. Windows PowerShell classica su alcuni PC): il buffer scorreva e rinumerava le righe durante la stampa iniziale, invalidando le coordinate assolute calcolate — risolto forzando un'altezza di buffer sufficiente e troncando il messaggio di avviso larghezza finestra che andava a capo da solo consumando righe non contate.
+### Fixed
+- Binding of multiple positional hosts (`ValueFromRemainingArguments`) that failed with more than one positional argument.
+- IP column showing `0.0.0.0` on timeouts instead of keeping the last valid IP.
+- Dashboard rows not all updating (only the last one) due to a race condition in repeated `CursorTop` reads on Windows Terminal/ConPTY. Fixed with a single initial read and arithmetic per-row offsets.
+- Header/row word-wrap wider than the window, which threw off row indices and caused `SetCursorPosition` crashes. Fixed by truncating/padding every row to the console width.
+- Duplicate rows and crashes after repeated runs caused by buffer scroll from previous content. Fixed with `Clear-Host` at the start of every monitoring session.
+- Version banner disappearing because it was printed before `Clear-Host`. Now reprinted right after.
+- Visible console error when an FQDN failed to resolve, caused by `Task.WaitAll` rethrowing the aggregate exception before the intended handling. Fixed by waiting for task completion without propagating the exception at that point.
+- Dashboard breaking on consoles with a small vertical buffer (e.g. classic Windows PowerShell on some PCs): the buffer scrolled and renumbered rows during the initial printing, invalidating the calculated absolute coordinates. Fixed by forcing a sufficient buffer height and truncating the width-warning message, which was wrapping onto extra unaccounted lines.
 
-## [1.x] — Sping.vbs (originale)
+## [1.x] - Sping.vbs (original)
 
-Versione VBScript originale: ping multi-host, TTL/timeout, allarme sonoro al ripristino, impostazioni e liste host nel registro di Windows.
+Original VBScript version: multi-host ping, TTL/timeout, sound alert on recovery, settings and host lists in the Windows registry.
