@@ -62,6 +62,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Interfaccia in italiano (default: inglese)
 .\Sping.ps1 -ListName Core -Language it
 
+# Log in JSON Lines invece che CSV, per un SIEM o uno strumento di monitoring
+.\Sping.ps1 -ListName Core -Log -LogFormat Json
+
 # Avvia con l'allarme sonoro disattivato
 .\Sping.ps1 -ListName Core -DisableAlerts
 
@@ -99,7 +102,8 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-Summary` | Griglia compatta invece di una riga per host, vedi `-SummaryColumns` |
 | `-SummaryColumns` | Solo con `-Summary`: numero di host per riga nella griglia compatta (default 4) |
 | `-SoundFile` | WAV riprodotto al ripristino di un host |
-| `-Log` / `-LogFile` | Abilita il logging CSV (default o percorso custom) |
+| `-Log` / `-LogFile` | Abilita il logging (default o percorso custom) |
+| `-LogFormat` | `Csv` (default) o `Json`: quest'ultimo scrive un oggetto JSON compatto per riga (JSON Lines/NDJSON), adatto all'ingestione da parte di strumenti SIEM/monitoring, con più campi del CSV (protocollo, jitter, giorni alla scadenza del certificato) |
 | `-SaveAsDefault` | Salva i parametri di questa esecuzione come nuovi default |
 | `-ShowSettings` / `-ShowLists` | Mostra impostazioni/liste salvate ed esce |
 | `-SaveList` / `-RemoveList` | Salva o elimina una lista host sotto `-ListName` |

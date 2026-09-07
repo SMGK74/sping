@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.8.4 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.9.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -105,11 +105,18 @@
     WAV file to play when a host recovers.
 
 .PARAMETER Log
-    Enable CSV logging to the default path (SpingData\logs next to the script, or %APPDATA%\SM-Script\Sping\logs
-    as fallback - see DESCRIPTION). Off by default.
+    Enable logging to the default path (SpingData\logs next to the script, or %APPDATA%\SM-Script\Sping\logs
+    as fallback - see DESCRIPTION). Off by default. Format controlled by -LogFormat.
 
 .PARAMETER LogFile
-    Enable CSV logging to a specific path (implies -Log). Off by default.
+    Enable logging to a specific path (implies -Log). Off by default.
+
+.PARAMETER LogFormat
+    Csv (default) or Json. Json writes one compact JSON object per line (JSON Lines / NDJSON,
+    suitable for streaming ingestion by SIEM/monitoring tools such as Splunk, ELK, or Sentinel)
+    with more fields than the fixed CSV columns: protocol, jitter, and certificate days-to-expiry
+    when available. The default log filename extension matches the format (.csv or .jsonl) unless
+    -LogFile sets an explicit path.
 
 .PARAMETER SaveAsDefault
     Persist the numeric/behavioural parameters given on this run as the new defaults.
@@ -184,6 +191,8 @@ param(
     [string]$SoundFile,
     [switch]$Log,
     [string]$LogFile,
+    [ValidateSet('Csv', 'Json')]
+    [string]$LogFormat,
     [switch]$SaveAsDefault,
     [switch]$ShowSettings,
     [switch]$ShowLists,
@@ -198,7 +207,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.8.4'
+$script:ScriptVersion = '2.9.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -241,6 +250,7 @@ function Get-SpingConfig {
         IntervalMillis  = 1000
         Summary         = $false
         SummaryColumns  = 4
+        LogFormat       = 'Csv'
         SoundFile       = 'resume.wav'
         Protocol        = 'Icmp'
         Port            = 0
@@ -594,6 +604,7 @@ if (-not $PSBoundParameters.ContainsKey('IntervalMillis'))   { $IntervalMillis =
 if (-not $PSBoundParameters.ContainsKey('SoundFile'))        { $SoundFile      = $cfg.SoundFile }
 if (-not $PSBoundParameters.ContainsKey('Summary'))          { $Summary        = [bool]$cfg.Summary }
 if (-not $PSBoundParameters.ContainsKey('SummaryColumns') -or $SummaryColumns -le 0) { $SummaryColumns = if ($cfg.SummaryColumns) { $cfg.SummaryColumns } else { 4 } }
+if (-not $PSBoundParameters.ContainsKey('LogFormat')) { $LogFormat = if ($cfg.LogFormat) { $cfg.LogFormat } else { 'Csv' } }
 if (-not $PSBoundParameters.ContainsKey('Protocol'))         { $Protocol       = $cfg.Protocol }
 if (-not $Protocol) { $Protocol = 'Icmp' }
 if (-not $PSBoundParameters.ContainsKey('Port') -and $cfg.Port) { $Port = $cfg.Port }
@@ -625,6 +636,7 @@ if ($SaveAsDefault) {
     $cfg.SoundFile       = $SoundFile
     $cfg.Summary         = [bool]$Summary
     $cfg.SummaryColumns  = $SummaryColumns
+    $cfg.LogFormat       = $LogFormat
     $cfg.Protocol        = $Protocol
     $cfg.Port            = $Port
     $cfg.CertWarningDays = $CertWarningDays
@@ -678,7 +690,8 @@ $domainSuffix = if ($Domain) { if ($Domain.StartsWith('.')) { $Domain } else { "
 $loggingEnabled = [bool]$Log -or $PSBoundParameters.ContainsKey('LogFile')
 if ($loggingEnabled -and -not $LogFile) {
     if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-    $LogFile = Join-Path $LogDir ("sping_{0:yyyyMMdd_HHmmss}.csv" -f (Get-Date))
+    $logExtension = if ($LogFormat -eq 'Json') { 'jsonl' } else { 'csv' }
+    $LogFile = Join-Path $LogDir ("sping_{0:yyyyMMdd_HHmmss}.{1}" -f (Get-Date), $logExtension)
 }
 
 # HttpClient va creato una sola volta e riusato per ogni ciclo/host (a differenza di Ping, non e' pensato
@@ -1263,7 +1276,7 @@ try {
         # Opened once, here, not reopened every cycle.
         $logWriter = New-Object System.IO.StreamWriter($LogFile, $true, [System.Text.Encoding]::UTF8)
         $logWriter.AutoFlush = $true
-        if ($fileIsNew) { $logWriter.WriteLine('Timestamp,Cycle,Host,ResolvedIp,Status,RoundtripMs,ConsecutiveFails,TotalSent,TotalReceived,TotalLost') }
+        if ($fileIsNew -and $LogFormat -ne 'Json') { $logWriter.WriteLine('Timestamp,Cycle,Host,ResolvedIp,Status,RoundtripMs,ConsecutiveFails,TotalSent,TotalReceived,TotalLost') }
     }
 
     for ($cycle = 1; $cycle -le $Count -and -not $stopRequested; $cycle++) {
@@ -1314,10 +1327,37 @@ try {
             }
 
             if ($loggingEnabled) {
-                $rttForLog = if ($null -ne $state.LastRtt) { $state.LastRtt } else { '' }
-                $logWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}' -f `
-                    (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $cycle, $state.Host, $state.ResolvedIp, $state.StatusText, `
-                    $rttForLog, $state.ConsecutiveFails, $state.TotalSent, $state.TotalReceived, $state.TotalLost))
+                $rttForLog = if ($null -ne $state.LastRtt) { $state.LastRtt } else { $null }
+                if ($LogFormat -eq 'Json') {
+                    # JSON Lines (NDJSON): un oggetto JSON compatto per riga, pensato per l'ingestione in
+                    # streaming da parte di strumenti SIEM/monitoring (Splunk, ELK, Sentinel, ecc.), a
+                    # differenza di un unico array JSON che richiederebbe il file chiuso per essere valido.
+                    $jitterForLog = if ($null -ne $state.Jitter) { [math]::Round($state.Jitter, 1) } else { $null }
+                    $certDaysForLog = $null
+                    if ($Protocol -eq 'Https' -and $state.CertExpiry) {
+                        $certDaysForLog = [Math]::Floor(($state.CertExpiry - (Get-Date)).TotalDays)
+                    }
+                    $logEntry = [ordered]@{
+                        timestamp        = (Get-Date).ToString('o')
+                        cycle            = $cycle
+                        host             = $state.Host
+                        resolvedIp       = $state.ResolvedIp
+                        protocol         = $Protocol
+                        status           = $state.StatusText
+                        rttMs            = $rttForLog
+                        jitterMs         = $jitterForLog
+                        consecutiveFails = $state.ConsecutiveFails
+                        totalSent        = $state.TotalSent
+                        totalReceived    = $state.TotalReceived
+                        totalLost        = $state.TotalLost
+                        certDaysToExpiry = $certDaysForLog
+                    }
+                    $logWriter.WriteLine(($logEntry | ConvertTo-Json -Compress))
+                } else {
+                    $logWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}' -f `
+                        (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $cycle, $state.Host, $state.ResolvedIp, $state.StatusText, `
+                        $(if ($null -ne $rttForLog) { $rttForLog } else { '' }), $state.ConsecutiveFails, $state.TotalSent, $state.TotalReceived, $state.TotalLost))
+                }
             }
 
             if (-not $Summary) {

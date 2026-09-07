@@ -4,6 +4,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.9.0]
+
+### Added
+- `-LogFormat` parameter (`Csv` by default, or `Json`): the JSON format writes one compact object per line (JSON Lines / NDJSON), designed for streaming ingestion by SIEM/monitoring tools (Splunk, ELK, Sentinel, etc.), with more fields than the fixed CSV columns: protocol, jitter, certificate days-to-expiry when available. The default log filename extension matches the chosen format (`.csv` or `.jsonl`). Persisted with `-SaveAsDefault`.
+
 ## [Infrastructure]
 
 ### Added
