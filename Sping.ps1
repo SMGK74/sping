@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.10.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.10.1 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -226,7 +226,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.10.0'
+$script:ScriptVersion = '2.10.1'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -371,6 +371,8 @@ $script:BuiltInStrings = @{
         PathChanged           = "Route changed for {0}"
         PathChangedSuffix     = "[ROUTE CHANGED]"
         PathChangeNoticesHeader = "Route changes detected (full before/after path saved to):"
+        PathTraceProgress     = "Tracing {0}: hop {1}/{2} -> {3}"
+        PathTraceNextIn       = "Next path trace: {0} in {1} min"
         PingError             = "Ping error"
         RequestError          = "Request error"
         Timeout               = "Timeout"
@@ -423,6 +425,8 @@ $script:BuiltInStrings = @{
         PathChanged           = "Percorso cambiato per {0}"
         PathChangedSuffix     = "[PERCORSO CAMBIATO]"
         PathChangeNoticesHeader = "Cambi di percorso rilevati (percorso prima/dopo completo salvato in):"
+        PathTraceProgress     = "Tracciamento {0}: hop {1}/{2} -> {3}"
+        PathTraceNextIn       = "Prossima traccia percorso: {0} tra {1} min"
         PingError             = "Errore ping"
         RequestError          = "Errore richiesta"
         Timeout               = "Timeout"
@@ -1255,9 +1259,12 @@ if ($TraceOnFailure -and -not $Summary) {
 }
 
 $script:pathChangeNoticeRow = $null
+$script:pathTraceProgressRow = $null
 if ($TracePathChanges -and -not $Summary) {
     Write-Host (Format-DashboardRow '')
     $script:pathChangeNoticeRow = if ($null -ne $script:traceNoticeRow) { 2 } else { 1 }
+    Write-Host (Format-DashboardRow '')
+    $script:pathTraceProgressRow = $script:pathChangeNoticeRow + 1
 }
 
 if (-not $Summary) {
@@ -1424,6 +1431,23 @@ try {
                         $script:PathChangeNotices += "$($state.Host) -> $pathFile"
                     } catch { }
                 }
+            }
+
+            if ($null -ne $script:pathTraceProgressRow) {
+                $activeState = $hostStates | Where-Object { $_.PathTraceActive } | Select-Object -First 1
+                if ($activeState) {
+                    $hopsSoFar = if ($activeState.PathTraceHops -and $activeState.PathTraceHops.Count -gt 0) { $activeState.PathTraceHops -join ' > ' } else { '...' }
+                    $progressText = $S.PathTraceProgress -f $activeState.Host, $activeState.PathTraceHop, $PathTraceMaxHops, $hopsSoFar
+                } else {
+                    $nextState = $hostStates | Where-Object { $_.NextPathTraceTime } | Sort-Object NextPathTraceTime | Select-Object -First 1
+                    if ($nextState) {
+                        $minutesLeft = [Math]::Max(0, [Math]::Ceiling(($nextState.NextPathTraceTime - (Get-Date)).TotalMinutes))
+                        $progressText = $S.PathTraceNextIn -f $nextState.Host, $minutesLeft
+                    } else {
+                        $progressText = ''
+                    }
+                }
+                Write-DashboardLine -Row $script:pathTraceProgressRow -Text $progressText -Color ([System.ConsoleColor]::DarkCyan)
             }
         }
 

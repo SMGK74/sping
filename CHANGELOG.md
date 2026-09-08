@@ -4,6 +4,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.10.1]
+
+### Added
+- Dedicated dashboard row showing the active path trace live (host, current hop out of total, IPs discovered so far), or a countdown in minutes to the next one when no trace is active. Previously there was no way to confirm `-TracePathChanges` was actually working while the route stayed unchanged.
+
 ## [2.10.0]
 
 ### Added

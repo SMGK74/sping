@@ -4,6 +4,11 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.10.1]
+
+### Aggiunto
+- Riga dedicata della dashboard che mostra live il tracciamento del percorso in corso (host, hop attuale su totale, IP scoperti finora), o quando nessuna traccia è attiva il conto alla rovescia in minuti alla prossima. Prima non c'era modo di confermare che `-TracePathChanges` stesse effettivamente lavorando quando il percorso non cambiava.
+
 ## [2.10.0]
 
 ### Aggiunto
