@@ -4,6 +4,12 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.10.0]
+
+### Aggiunto
+- Parametro `-TracePathChanges`: ritraccia periodicamente il percorso di rete verso ogni host, indipendentemente dal ciclo di ping e da `-TraceOnFailure`, con una sonda nativa (nessun processo esterno, nessuna dipendenza dalla lingua di Windows) e non bloccante (un hop per ciclo, spalmato su più cicli). Segnala qualunque differenza rispetto alla traccia precedente, sia nel numero di hop sia negli hop stessi a parità di lunghezza. Un marcatore compare su STATO per quel ciclo, e il dettaglio completo prima/dopo viene salvato in un file sotto `SpingData\pathtraces`.
+- Parametri `-PathTraceIntervalMinutes` (default 15) e `-PathTraceMaxHops` (default 20) per controllare frequenza e profondità del tracciamento.
+
 ## [2.9.0]
 
 ### Aggiunto

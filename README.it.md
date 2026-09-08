@@ -59,6 +59,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Traceroute automatico al primo fallimento di ogni "episodio" di down (processo indipendente in background)
 .\Sping.ps1 db-server-01 web-server-02 -TraceOnFailure -Log
 
+# Segnala se il percorso di rete verso un host cambia, controllato ogni 30 minuti
+.\Sping.ps1 vpn-remoto.contoso.local -TracePathChanges -PathTraceIntervalMinutes 30
+
 # Interfaccia in italiano (default: inglese)
 .\Sping.ps1 -ListName Core -Language it
 
@@ -86,6 +89,9 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-TraceOnFailure` | Quando i fallimenti consecutivi di un host passano da 0 a 1 (inizio di un nuovo episodio di down), avvia `tracert -d -h 20 -w 1000` per quell'host come processo indipendente in background (non blocca la dashboard), salvando l'output in un file con timestamp sotto `SpingData\traces`. Scatta una volta per episodio, non ad ogni ciclo fallito. Un avviso in riga 1 della dashboard mostra l'ultimo traceroute avviato o saltato |
 | `-TraceCooldownMinutes` | Solo con `-TraceOnFailure`: minuti minimi tra due traceroute per lo stesso host, per non ritracciare un host che flappa a ogni episodio (default 10) |
 | `-MaxConcurrentTraces` | Solo con `-TraceOnFailure`: tetto massimo di `tracert` in esecuzione contemporanea su tutti gli host, per non esaurire le risorse quando molti host cadono insieme (es. un range CIDR ampio) (default 5) |
+| `-TracePathChanges` | Ritraccia periodicamente il percorso verso ogni host (indipendente dal ciclo di ping e da `-TraceOnFailure`) con una sonda nativa non bloccante spalmata su più cicli, segnalando se il percorso cambia rispetto alla traccia precedente. Il dettaglio completo prima/dopo viene salvato in un file sotto `SpingData\pathtraces` |
+| `-PathTraceIntervalMinutes` | Solo con `-TracePathChanges`: minuti tra la fine di una traccia completata e l'inizio della successiva, per host (default 15) |
+| `-PathTraceMaxHops` | Solo con `-TracePathChanges`: numero massimo di hop da sondare prima di rinunciare a raggiungere la destinazione (default 20) |
 | `-ListName` | Nome di una lista host salvata (combinabile con `ComputerName`) |
 | `-Domain` | Suffisso DNS aggiunto a ogni host |
 | `-Count` | Numero di cicli di ping (default: continuo) |
@@ -130,6 +136,12 @@ L'interfaccia parte in italiano se il sistema è in italiano, altrimenti in ingl
 
 - **JITTER(ms)**: media mobile della variazione tra RTT consecutivi (stessa formula di RFC 3550/1889), visibile in dashboard e nel riepilogo finale. Utile per individuare collegamenti instabili anche quando la perdita pacchetti è bassa.
 - **Scadenza certificato** (`-Protocol Https`): all'avvio, una sola volta per host (non ad ogni ciclo, per non aggiungere carico oltre al monitoraggio stesso), viene letta la data di scadenza del certificato TLS. La colonna CERT(gg) mostra i giorni rimanenti (negativo se già scaduto), con un `!` quando rientra entro `-CertWarningDays` giorni (default 30).
+
+## Rilevamento cambi di percorso
+
+`-TracePathChanges` traccia periodicamente il percorso di rete (hop per hop) verso ogni host e segnala se cambia rispetto alla traccia precedente. Utile per notare un failover su un collegamento di backup, una riconvergenza di routing, o instradamenti inattesi. La sonda è nativa (nessun processo esterno), non bloccante (un hop per ciclo, spalmato su più cicli) e completamente separata da `-TraceOnFailure`.
+
+**Attenzione alle reti con bilanciamento di carico (ECMP)**: se la tua rete instrada pacchetti diversi dello stesso flusso su percorsi leggermente diversi (comune con più collegamenti WAN in bilanciamento), potresti vedere avvisi anche senza nessun problema reale. La funzione confronta l'intera lista di hop: qualunque differenza, anche di un solo hop a parità di lunghezza del percorso, scatena la segnalazione.
 
 ## Note di compatibilità console
 

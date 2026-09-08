@@ -4,6 +4,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.10.0]
+
+### Added
+- `-TracePathChanges` parameter: periodically re-traces the network path to every host, independent of the ping cycle and of `-TraceOnFailure`, using a native probe (no external process, no dependency on Windows language) that is non-blocking (one hop per cycle, spread across several cycles). Flags any difference from the previous trace, whether in hop count or in the hops themselves at equal length. A marker appears on STATUS for that cycle, and full before/after detail is saved to a file under `SpingData\pathtraces`.
+- `-PathTraceIntervalMinutes` (default 15) and `-PathTraceMaxHops` (default 20) parameters to control tracing frequency and depth.
+
 ## [2.9.0]
 
 ### Added

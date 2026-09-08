@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.9.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.10.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -43,6 +43,22 @@
     Only relevant with -TraceOnFailure. Cap on how many tracert processes can be running at once
     across ALL hosts, to avoid exhausting system resources when many hosts fail together (e.g. a
     broad CIDR range going down at once). Default: 5. Extra traces are skipped, not queued.
+
+.PARAMETER TracePathChanges
+    Periodically re-traces the route to every host (independent of the ping cycle, and independent
+    of -TraceOnFailure) using a native, non-blocking hop-by-hop probe spread across several cycles
+    (one hop per cycle, never pausing the dashboard), and flags it if the route differs from the
+    previous trace - different hop count, or same count with different hops. A change appends a
+    brief marker to STATO for that cycle, and full before/after hop details are saved to a
+    timestamped file under SpingData\pathtraces.
+
+.PARAMETER PathTraceIntervalMinutes
+    Only relevant with -TracePathChanges. Minutes between the end of one completed trace and the
+    start of the next, per host. Default: 15.
+
+.PARAMETER PathTraceMaxHops
+    Only relevant with -TracePathChanges. Maximum hops to probe before giving up on reaching the
+    destination. Default: 20.
 
 .PARAMETER ListName
     Name of a previously saved host list to ping (can be combined with -ComputerName).
@@ -178,6 +194,9 @@ param(
     [switch]$TraceOnFailure,
     [int]$TraceCooldownMinutes,
     [int]$MaxConcurrentTraces,
+    [switch]$TracePathChanges,
+    [int]$PathTraceIntervalMinutes,
+    [int]$PathTraceMaxHops,
     [switch]$IgnoreCertificateErrors,
     [int]$CertWarningDays,
     [switch]$DisableAlerts,
@@ -207,7 +226,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.9.0'
+$script:ScriptVersion = '2.10.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -236,6 +255,7 @@ $script:ListsFile  = Join-Path $ConfigDir 'lists.json'
 $script:LogDir     = Join-Path $ConfigDir 'logs'
 $script:LangDir    = Join-Path $ConfigDir 'lang'
 $script:TraceDir   = Join-Path $ConfigDir 'traces'
+$script:PathTraceDir = Join-Path $ConfigDir 'pathtraces'
 
 function Get-SpingConfig {
     # Rilevata dalla cultura UI di sistema solo alla creazione iniziale del file (primo avvio in assoluto):
@@ -348,6 +368,9 @@ $script:BuiltInStrings = @{
         TraceStarted          = "Traceroute started for {0}"
         TraceSkippedCooldown  = "Traceroute skipped for {0} (cooldown active)"
         TraceSkippedCap       = "Traceroute skipped for {0} (max concurrent reached)"
+        PathChanged           = "Route changed for {0}"
+        PathChangedSuffix     = "[ROUTE CHANGED]"
+        PathChangeNoticesHeader = "Route changes detected (full before/after path saved to):"
         PingError             = "Ping error"
         RequestError          = "Request error"
         Timeout               = "Timeout"
@@ -397,6 +420,9 @@ $script:BuiltInStrings = @{
         TraceStarted          = "Traceroute avviato per {0}"
         TraceSkippedCooldown  = "Traceroute saltato per {0} (cooldown attivo)"
         TraceSkippedCap       = "Traceroute saltato per {0} (limite massimo raggiunto)"
+        PathChanged           = "Percorso cambiato per {0}"
+        PathChangedSuffix     = "[PERCORSO CAMBIATO]"
+        PathChangeNoticesHeader = "Cambi di percorso rilevati (percorso prima/dopo completo salvato in):"
         PingError             = "Errore ping"
         RequestError          = "Errore richiesta"
         Timeout               = "Timeout"
@@ -649,6 +675,8 @@ if ($SaveAsDefault) {
 if (-not $PSBoundParameters.ContainsKey('MaxRangeHosts') -or $MaxRangeHosts -le 0) { $MaxRangeHosts = 1024 }
 if (-not $PSBoundParameters.ContainsKey('TraceCooldownMinutes') -or $TraceCooldownMinutes -le 0) { $TraceCooldownMinutes = 10 }
 if (-not $PSBoundParameters.ContainsKey('MaxConcurrentTraces') -or $MaxConcurrentTraces -le 0) { $MaxConcurrentTraces = 5 }
+if (-not $PSBoundParameters.ContainsKey('PathTraceIntervalMinutes') -or $PathTraceIntervalMinutes -le 0) { $PathTraceIntervalMinutes = 15 }
+if (-not $PSBoundParameters.ContainsKey('PathTraceMaxHops') -or $PathTraceMaxHops -le 0) { $PathTraceMaxHops = 20 }
 
 # Merge -ComputerName with an optional saved -ListName
 $rawTargets = New-Object System.Collections.Generic.List[string]
@@ -1037,6 +1065,81 @@ function Get-SpingActiveTraceCount {
     return $script:ActiveTraceProcesses.Count
 }
 
+function Start-SpingPathTraceStep {
+    param($State, [int]$MaxHops, [int]$TimeoutMs, [int]$IntervalMinutes)
+
+    # Avanza il tracciamento del percorso di UN hop per chiamata, invece di fare tutto il traceroute in
+    # un colpo solo: cosi' non blocca mai il ciclo principale, nemmeno per un secondo. Una traccia completa
+    # richiede quindi piu' cicli (fino a MaxHops), esattamente come il motore ping/DNS usa gia' lo stesso
+    # schema di polling non bloccante (IsCompleted) invece di attese sincrone.
+    $State.PathChangedThisCycle = $false
+
+    if (-not $State.PathTraceActive) {
+        if ($State.NextPathTraceTime -and (Get-Date) -lt $State.NextPathTraceTime) { return }
+        $State.PathTraceActive = $true
+        $State.PathTraceHop = 1
+        $State.PathTraceHops = New-Object System.Collections.Generic.List[string]
+    }
+
+    if (-not $State.PathTraceTask) {
+        try {
+            $pingOptions = New-Object System.Net.NetworkInformation.PingOptions($State.PathTraceHop, $false)
+            $buffer = [System.Text.Encoding]::ASCII.GetBytes(('a' * 32))
+            $p = New-Object System.Net.NetworkInformation.Ping
+            $State.PathTracePingObj = $p
+            $State.PathTraceTask = $p.SendPingAsync($State.Host, $TimeoutMs, $buffer, $pingOptions)
+        } catch {
+            $State.PathTraceHops.Add('*')
+            $State.PathTracePingObj = $null
+            $State.PathTraceTask = $null
+            $State.PathTraceHop++
+        }
+        return
+    }
+
+    if (-not $State.PathTraceTask.IsCompleted) { return }
+
+    $reachedDestination = $false
+    try {
+        $reply = $State.PathTraceTask.GetAwaiter().GetResult()
+        if ($reply.Address -and ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::TtlExpired -or $reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success)) {
+            $State.PathTraceHops.Add($reply.Address.ToString())
+            if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) { $reachedDestination = $true }
+        } else {
+            $State.PathTraceHops.Add('*')
+        }
+    } catch {
+        $State.PathTraceHops.Add('*')
+    } finally {
+        if ($State.PathTracePingObj) { try { $State.PathTracePingObj.Dispose() } catch { } }
+        $State.PathTracePingObj = $null
+        $State.PathTraceTask = $null
+    }
+
+    $State.PathTraceHop++
+
+    if ($reachedDestination -or $State.PathTraceHop -gt $MaxHops) {
+        $newHops = @($State.PathTraceHops)
+        if ($State.LastPathHops) {
+            $oldHops = @($State.LastPathHops)
+            $changed = $oldHops.Count -ne $newHops.Count
+            if (-not $changed) {
+                for ($i = 0; $i -lt $newHops.Count; $i++) {
+                    if ($oldHops[$i] -ne $newHops[$i]) { $changed = $true; break }
+                }
+            }
+            if ($changed) {
+                $State.PathChangedThisCycle = $true
+                $State.PathChangeOldHops = $oldHops
+                $State.PathChangeNewHops = $newHops
+            }
+        }
+        $State.LastPathHops = $newHops
+        $State.PathTraceActive = $false
+        $State.NextPathTraceTime = (Get-Date).AddMinutes($IntervalMinutes)
+    }
+}
+
 function Invoke-ResumeAlert {
     param([string]$TargetHost, [string]$WavFile)
     try {
@@ -1079,6 +1182,16 @@ $hostStates = foreach ($h in $targets) {
         TcpClientObj     = $null
         ConnectTask      = $null
         LastTraceTime    = $null
+        PathTraceActive  = $false
+        PathTraceHop     = 1
+        PathTraceHops    = $null
+        PathTraceTask    = $null
+        PathTracePingObj = $null
+        LastPathHops     = $null
+        NextPathTraceTime = $null
+        PathChangedThisCycle = $false
+        PathChangeOldHops = $null
+        PathChangeNewHops = $null
     }
 }
 
@@ -1139,6 +1252,12 @@ $script:traceNoticeRow = $null
 if ($TraceOnFailure -and -not $Summary) {
     Write-Host (Format-DashboardRow '')
     $script:traceNoticeRow = 1
+}
+
+$script:pathChangeNoticeRow = $null
+if ($TracePathChanges -and -not $Summary) {
+    Write-Host (Format-DashboardRow '')
+    $script:pathChangeNoticeRow = if ($null -ne $script:traceNoticeRow) { 2 } else { 1 }
 }
 
 if (-not $Summary) {
@@ -1263,6 +1382,7 @@ function Write-DashboardSegments {
 $logWriter = $null
 $stopRequested = $false
 $script:TraceNotices = @()
+$script:PathChangeNotices = @()
 $script:ActiveTraceProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $previousTreatCtrlC = [console]::TreatControlCAsInput
 [console]::TreatControlCAsInput = $true
@@ -1283,6 +1403,30 @@ try {
 
         Start-SpingCycle -HostStates $hostStates -Ttl $TimeToLive -TimeoutMs $TimeoutMillis -Protocol $Protocol -Port $Port
 
+        if ($TracePathChanges) {
+            foreach ($state in $hostStates) {
+                Start-SpingPathTraceStep -State $state -MaxHops $PathTraceMaxHops -TimeoutMs $TimeoutMillis -IntervalMinutes $PathTraceIntervalMinutes
+                if ($state.PathChangedThisCycle) {
+                    $script:PathChangeNoticeText = $S.PathChanged -f $state.Host
+                    if ($null -ne $script:pathChangeNoticeRow) {
+                        Write-DashboardLine -Row $script:pathChangeNoticeRow -Text $script:PathChangeNoticeText -Color ([System.ConsoleColor]::Yellow)
+                    }
+                    try {
+                        if (-not (Test-Path $script:PathTraceDir)) { New-Item -ItemType Directory -Path $script:PathTraceDir -Force | Out-Null }
+                        $safeName = $state.Host -replace '[:\\/*?"<>|]', '_'
+                        $pathFile = Join-Path $script:PathTraceDir ("{0}_{1:yyyyMMdd_HHmmss}.txt" -f $safeName, (Get-Date))
+                        $lines = @("Host: $($state.Host)", "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')", '', 'Previous path:')
+                        $lines += ($state.PathChangeOldHops | ForEach-Object { "  $_" })
+                        $lines += ''
+                        $lines += 'New path:'
+                        $lines += ($state.PathChangeNewHops | ForEach-Object { "  $_" })
+                        Set-Content -Path $pathFile -Value $lines -Encoding UTF8
+                        $script:PathChangeNotices += "$($state.Host) -> $pathFile"
+                    } catch { }
+                }
+            }
+        }
+
         foreach ($state in $hostStates) {
 
             # Jitter: media mobile della variazione assoluta tra RTT consecutivi (stessa formula di RFC 3550/1889),
@@ -1292,6 +1436,10 @@ try {
                 $state.Jitter = if ($null -eq $state.Jitter) { $rttDiff } else { $state.Jitter + (($rttDiff - $state.Jitter) / 16) }
             }
             $state.PrevRtt = $state.LastRtt
+
+            if ($state.PathChangedThisCycle) {
+                $state.StatusText += " $($S.PathChangedSuffix)"
+            }
 
             $state.TotalSent++
             if ($state.Success) {
@@ -1452,6 +1600,11 @@ finally {
         Write-Host ''
         Write-Host $S.TraceNoticesHeader -ForegroundColor DarkGray
         foreach ($notice in $script:TraceNotices) { Write-Host "  $notice" -ForegroundColor DarkGray }
+    }
+    if ($script:PathChangeNotices.Count -gt 0) {
+        Write-Host ''
+        Write-Host $S.PathChangeNoticesHeader -ForegroundColor Yellow
+        foreach ($notice in $script:PathChangeNotices) { Write-Host "  $notice" -ForegroundColor Yellow }
     }
 }
 
