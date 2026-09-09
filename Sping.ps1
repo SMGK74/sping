@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.10.1 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.10.2 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -226,7 +226,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.10.1'
+$script:ScriptVersion = '2.10.2'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -1434,10 +1434,16 @@ try {
             }
 
             if ($null -ne $script:pathTraceProgressRow) {
-                $activeState = $hostStates | Where-Object { $_.PathTraceActive } | Select-Object -First 1
-                if ($activeState) {
+                $activeStates = @($hostStates | Where-Object { $_.PathTraceActive })
+                if ($activeStates.Count -gt 0) {
+                    # Ruota tra tutte le tracce attualmente attive invece di mostrare sempre la stessa (che
+                    # altrimenti "occuperebbe" la riga per tutta la sua durata se e' piu' lenta delle altre,
+                    # es. un host irraggiungibile con molti hop a vuoto), cosi' nel tempo si vedono tutte.
+                    $pickIndex = ($cycle - 1) % $activeStates.Count
+                    $activeState = $activeStates[$pickIndex]
                     $hopsSoFar = if ($activeState.PathTraceHops -and $activeState.PathTraceHops.Count -gt 0) { $activeState.PathTraceHops -join ' > ' } else { '...' }
                     $progressText = $S.PathTraceProgress -f $activeState.Host, $activeState.PathTraceHop, $PathTraceMaxHops, $hopsSoFar
+                    if ($activeStates.Count -gt 1) { $progressText += " ($($pickIndex + 1)/$($activeStates.Count))" }
                 } else {
                     $nextState = $hostStates | Where-Object { $_.NextPathTraceTime } | Sort-Object NextPathTraceTime | Select-Object -First 1
                     if ($nextState) {

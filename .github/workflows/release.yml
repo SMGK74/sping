@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Build release package and extract changelog section
+        id: build
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+
+          # Pacchetto pulito: solo i file utili a chi usa lo script, non quelli di sviluppo
+          # (workflow, .gitignore, eccetera).
+          $packageDir = "package"
+          New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+          Copy-Item -Path Sping.ps1, README.md, README.it.md, CHANGELOG.md, CHANGELOG.it.md, LICENSE -Destination $packageDir
+          $zipName = "Sping-$tag.zip"
+          Compress-Archive -Path "$packageDir/*" -DestinationPath $zipName
+          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          # Estrae automaticamente la sezione corrispondente dal CHANGELOG.md (tra "## [X.Y.Z]" e la
+          # prossima intestazione "## [") per usarla come descrizione della release, invece di scriverla
+          # a mano ogni volta.
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $pattern = "(?ms)^## \[$([regex]::Escape($version))\]\s*\r?\n(.*?)(?=^## \[|\z)"
+          $match = [regex]::Match($changelog, $pattern)
+          $notes = if ($match.Success) { $match.Groups[1].Value.Trim() } else { "See CHANGELOG.md for details." }
+          $notesFile = "release-notes.md"
+          Set-Content -Path $notesFile -Value $notes -Encoding utf8
+          "notes_file=$notesFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Sping ${{ github.ref_name }}"
+          body_path: ${{ steps.build.outputs.notes_file }}
+          files: ${{ steps.build.outputs.zip_name }}

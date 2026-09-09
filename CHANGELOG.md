@@ -4,6 +4,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.10.2]
+
+### Fixed
+- The live path-trace row always showed the same host (the first active one in the list), leaving traces on other hosts invisible if that one stayed active longer (typical of an unreachable host, with many hops not responding). It now rotates across all currently active traces, with a counter (e.g. "2/4") when there is more than one.
+
 ## [2.10.1]
 
 ### Added

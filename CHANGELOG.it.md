@@ -4,6 +4,11 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.10.2]
+
+### Corretto
+- La riga live del tracciamento percorso mostrava sempre lo stesso host (il primo nell'elenco che risultasse attivo), lasciando invisibili le tracce in corso su altri host se quello restava attivo più a lungo (tipico di un host irraggiungibile, con molti hop senza risposta). Ora ruota tra tutte le tracce attualmente attive, con un contatore (es. "2/4") quando ce n'è più di una.
+
 ## [2.10.1]
 
 ### Aggiunto
