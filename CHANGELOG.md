@@ -4,6 +4,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.11.0]
+
+### Added
+- `-DisplayFilter` parameter (`All` default, `UpOnly`, `DownOnly`) to show only reachable or only unreachable hosts in the dashboard. Rows stay at the fixed position assigned at startup (no layout recomputation): excluded hosts keep their row, simply left blank, to avoid reintroducing the buffer-scroll rendering risks already solved earlier. Cycle live with the `F` key during monitoring (All -> Up only -> Down only -> All), with feedback in the window title. Not available in `-Summary` mode.
+
 ## [2.10.2]
 
 ### Fixed

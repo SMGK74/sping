@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.10.2 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.11.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -59,6 +59,12 @@
 .PARAMETER PathTraceMaxHops
     Only relevant with -TracePathChanges. Maximum hops to probe before giving up on reaching the
     destination. Default: 20.
+
+.PARAMETER DisplayFilter
+    Which hosts to show in the dashboard: All (default), UpOnly (only reachable hosts), or
+    DownOnly (only unreachable hosts). Hidden hosts keep their row but it is left blank - rows
+    never move, so switching filters can't disturb the layout. Cycle live with the F key during
+    monitoring (All -> UpOnly -> DownOnly -> All). Not available in -Summary mode.
 
 .PARAMETER ListName
     Name of a previously saved host list to ping (can be combined with -ComputerName).
@@ -177,6 +183,9 @@
     .\Sping.ps1 db-server-01 -Protocol Tcp -Port 1433
 
 .EXAMPLE
+    .\Sping.ps1 -ListName Core -DisplayFilter DownOnly
+
+.EXAMPLE
     .\Sping.ps1 -ShowSettings -Language it
 #>
 [CmdletBinding()]
@@ -197,6 +206,8 @@ param(
     [switch]$TracePathChanges,
     [int]$PathTraceIntervalMinutes,
     [int]$PathTraceMaxHops,
+    [ValidateSet('All', 'UpOnly', 'DownOnly')]
+    [string]$DisplayFilter,
     [switch]$IgnoreCertificateErrors,
     [int]$CertWarningDays,
     [switch]$DisableAlerts,
@@ -226,7 +237,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.10.2'
+$script:ScriptVersion = '2.11.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -271,6 +282,7 @@ function Get-SpingConfig {
         Summary         = $false
         SummaryColumns  = 4
         LogFormat       = 'Csv'
+        DisplayFilter   = 'All'
         SoundFile       = 'resume.wav'
         Protocol        = 'Icmp'
         Port            = 0
@@ -349,7 +361,7 @@ $script:BuiltInStrings = @{
         ManyHostsWarning      = "Note: monitoring {0} hosts with one row each won't fit on a normal screen. Consider -Summary for a more compact view."
         ManyHostsPrompt       = "You're about to monitor {0} hosts in full dashboard mode, which likely won't fit on one screen. Switch to -Summary? [Y/n]: "
         MonitoringBanner      = "Sping - monitoring {0} hosts in parallel"
-        Instructions          = "Press Q or Ctrl+C to stop cleanly, A to toggle alerts on/off."
+        Instructions          = "Press Q or Ctrl+C to stop cleanly, A to toggle alerts on/off, F to cycle the host filter (All/Up only/Down only)."
         LogPath               = "Log: {0}"
         LogDisabled           = "Log: disabled (use -Log or -LogFile to enable it)"
         ColHost               = "HOST"
@@ -373,6 +385,10 @@ $script:BuiltInStrings = @{
         PathChangeNoticesHeader = "Route changes detected (full before/after path saved to):"
         PathTraceProgress     = "Tracing {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Next path trace: {0} in {1} min"
+        FilterLabel           = "Filter"
+        FilterAll             = "All"
+        FilterUpOnly          = "Up only"
+        FilterDownOnly        = "Down only"
         PingError             = "Ping error"
         RequestError          = "Request error"
         Timeout               = "Timeout"
@@ -403,7 +419,7 @@ $script:BuiltInStrings = @{
         ManyHostsWarning      = "Nota: monitorare {0} host con una riga ciascuno non entra in uno schermo normale. Valuta -Summary per una vista piu' compatta."
         ManyHostsPrompt       = "Stai per monitorare {0} host in modalita' completa, che probabilmente non entra in una schermata. Passare a -Summary? [S/n]: "
         MonitoringBanner      = "Sping - monitoraggio {0} host in parallelo"
-        Instructions          = "Premi Q oppure Ctrl+C per interrompere in modo pulito, A per attivare/disattivare gli avvisi."
+        Instructions          = "Premi Q oppure Ctrl+C per interrompere in modo pulito, A per attivare/disattivare gli avvisi, F per cambiare il filtro host (Tutti/Solo attivi/Solo inattivi)."
         LogPath               = "Log: {0}"
         LogDisabled           = "Log: disattivato (usa -Log o -LogFile per attivarlo)"
         ColHost               = "HOST"
@@ -427,6 +443,10 @@ $script:BuiltInStrings = @{
         PathChangeNoticesHeader = "Cambi di percorso rilevati (percorso prima/dopo completo salvato in):"
         PathTraceProgress     = "Tracciamento {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Prossima traccia percorso: {0} tra {1} min"
+        FilterLabel           = "Filtro"
+        FilterAll             = "Tutti"
+        FilterUpOnly          = "Solo attivi"
+        FilterDownOnly        = "Solo inattivi"
         PingError             = "Errore ping"
         RequestError          = "Errore richiesta"
         Timeout               = "Timeout"
@@ -635,6 +655,7 @@ if (-not $PSBoundParameters.ContainsKey('SoundFile'))        { $SoundFile      =
 if (-not $PSBoundParameters.ContainsKey('Summary'))          { $Summary        = [bool]$cfg.Summary }
 if (-not $PSBoundParameters.ContainsKey('SummaryColumns') -or $SummaryColumns -le 0) { $SummaryColumns = if ($cfg.SummaryColumns) { $cfg.SummaryColumns } else { 4 } }
 if (-not $PSBoundParameters.ContainsKey('LogFormat')) { $LogFormat = if ($cfg.LogFormat) { $cfg.LogFormat } else { 'Csv' } }
+if (-not $PSBoundParameters.ContainsKey('DisplayFilter')) { $DisplayFilter = if ($cfg.DisplayFilter) { $cfg.DisplayFilter } else { 'All' } }
 if (-not $PSBoundParameters.ContainsKey('Protocol'))         { $Protocol       = $cfg.Protocol }
 if (-not $Protocol) { $Protocol = 'Icmp' }
 if (-not $PSBoundParameters.ContainsKey('Port') -and $cfg.Port) { $Port = $cfg.Port }
@@ -667,6 +688,7 @@ if ($SaveAsDefault) {
     $cfg.Summary         = [bool]$Summary
     $cfg.SummaryColumns  = $SummaryColumns
     $cfg.LogFormat       = $LogFormat
+    $cfg.DisplayFilter   = $DisplayFilter
     $cfg.Protocol        = $Protocol
     $cfg.Port            = $Port
     $cfg.CertWarningDays = $CertWarningDays
@@ -1247,6 +1269,7 @@ function Format-DashboardRow {
 # Riga di stato avvisi: sempre la primissima riga stampata (riga 0), colorata, per dare un feedback immediato
 # quando si preme A. Il titolo della finestra (aggiornato anch'esso al toggle) non supporta testo colorato.
 $script:alertsEnabled = -not [bool]$DisableAlerts
+$script:displayFilter = $DisplayFilter
 $initialAlertText = if ($script:alertsEnabled) { $S.AlertsOn } else { $S.AlertsOff }
 $initialAlertColor = if ($script:alertsEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
 Write-Host (Format-DashboardRow $initialAlertText) -ForegroundColor $initialAlertColor
@@ -1348,6 +1371,36 @@ function Write-DashboardLine {
     }
 }
 
+function Write-SpingHostRow {
+    param($State)
+    # Le righe restano SEMPRE nella stessa posizione fissa assegnata all'avvio: un host escluso dal filtro
+    # non sposta gli altri, viene semplicemente svuotato. Questo evita di dover ricalcolare le posizioni
+    # (fonte, in passato, di diversi bug di rendering legati allo scroll del buffer console).
+    $visible = switch ($script:displayFilter) {
+        'UpOnly'   { $State.Success }
+        'DownOnly' { -not $State.Success }
+        default    { $true }
+    }
+    if (-not $visible) {
+        Write-DashboardLine -Row $State.Row -Text ''
+        return
+    }
+    $lossPct = if ($State.TotalSent -gt 0) { [math]::Round(($State.TotalLost / $State.TotalSent) * 100, 1) } else { 0 }
+    $rttDisplay = if ($null -ne $State.LastRtt) { $State.LastRtt } else { '-' }
+    $jitterDisplay = if ($null -ne $State.Jitter) { [math]::Round($State.Jitter, 1) } else { '-' }
+    $rowArgs = @($State.Host, $State.ResolvedIp, $State.StatusText, $rttDisplay, $jitterDisplay, $State.TotalSent, $State.TotalReceived, $State.TotalLost, $lossPct, $State.TtlExpiredCount)
+    if ($showCertColumn) {
+        $certDisplay = '-'
+        if ($State.CertExpiry) {
+            $daysLeft = [Math]::Floor(($State.CertExpiry - (Get-Date)).TotalDays)
+            $certDisplay = if ($daysLeft -le $CertWarningDays) { "$daysLeft!" } else { "$daysLeft" }
+        }
+        $rowArgs += $certDisplay
+    }
+    $line = $rowFormat -f $rowArgs
+    Write-DashboardLine -Row $State.Row -Text $line -Color (Get-StatusColor $State)
+}
+
 function Get-StatusColor {
     param($State)
     # Priorita': FQDN non risolto (giallo) > esito ping. Sotto soglia i fallimenti sono arancione (perdita iniziale),
@@ -1393,7 +1446,14 @@ $script:PathChangeNotices = @()
 $script:ActiveTraceProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $previousTreatCtrlC = [console]::TreatControlCAsInput
 [console]::TreatControlCAsInput = $true
-try { $Host.UI.RawUI.WindowTitle = "Sping - $initialAlertText" } catch { }
+try {
+    $initialFilterLabel = switch ($script:displayFilter) {
+        'UpOnly'   { $S.FilterUpOnly }
+        'DownOnly' { $S.FilterDownOnly }
+        default    { $S.FilterAll }
+    }
+    $Host.UI.RawUI.WindowTitle = "Sping - $initialAlertText | $($S.FilterLabel): $initialFilterLabel"
+} catch { }
 
 try {
     if ($loggingEnabled) {
@@ -1539,20 +1599,7 @@ try {
             }
 
             if (-not $Summary) {
-                $lossPct = if ($state.TotalSent -gt 0) { [math]::Round(($state.TotalLost / $state.TotalSent) * 100, 1) } else { 0 }
-                $rttDisplay = if ($null -ne $state.LastRtt) { $state.LastRtt } else { '-' }
-                $jitterDisplay = if ($null -ne $state.Jitter) { [math]::Round($state.Jitter, 1) } else { '-' }
-                $rowArgs = @($state.Host, $state.ResolvedIp, $state.StatusText, $rttDisplay, $jitterDisplay, $state.TotalSent, $state.TotalReceived, $state.TotalLost, $lossPct, $state.TtlExpiredCount)
-                if ($showCertColumn) {
-                    $certDisplay = '-'
-                    if ($state.CertExpiry) {
-                        $daysLeft = [Math]::Floor(($state.CertExpiry - (Get-Date)).TotalDays)
-                        $certDisplay = if ($daysLeft -le $CertWarningDays) { "$daysLeft!" } else { "$daysLeft" }
-                    }
-                    $rowArgs += $certDisplay
-                }
-                $line = $rowFormat -f $rowArgs
-                Write-DashboardLine -Row $state.Row -Text $line -Color (Get-StatusColor $state)
+                Write-SpingHostRow -State $state
             }
         }
 
@@ -1582,6 +1629,20 @@ try {
                     $alertText  = if ($script:alertsEnabled) { $script:S.AlertsOn } else { $script:S.AlertsOff }
                     Write-DashboardLine -Row $script:alertsRow -Text $alertText -Color $alertColor
                     try { $Host.UI.RawUI.WindowTitle = "Sping - $alertText" } catch { }
+                } elseif ($key.Key -eq [System.ConsoleKey]::F -and -not $Summary) {
+                    $script:displayFilter = switch ($script:displayFilter) {
+                        'All'      { 'UpOnly' }
+                        'UpOnly'   { 'DownOnly' }
+                        'DownOnly' { 'All' }
+                        default    { 'All' }
+                    }
+                    foreach ($fState in $hostStates) { Write-SpingHostRow -State $fState }
+                    $filterLabel = switch ($script:displayFilter) {
+                        'UpOnly'   { $script:S.FilterUpOnly }
+                        'DownOnly' { $script:S.FilterDownOnly }
+                        default    { $script:S.FilterAll }
+                    }
+                    try { $Host.UI.RawUI.WindowTitle = "Sping - $($script:S.FilterLabel): $filterLabel" } catch { }
                 }
             }
             $wait = [Math]::Min(50, $IntervalMillis - $elapsed)

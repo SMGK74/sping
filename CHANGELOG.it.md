@@ -4,6 +4,11 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.11.0]
+
+### Aggiunto
+- Parametro `-DisplayFilter` (`All` default, `UpOnly`, `DownOnly`) per mostrare nella dashboard solo gli host raggiungibili o solo quelli non raggiungibili. Le righe restano nella posizione fissa assegnata all'avvio (nessun ricalcolo del layout): gli host esclusi mantengono la loro riga, semplicemente vuota, per non reintrodurre i rischi di rendering legati allo scroll del buffer che avevamo già risolto. Cambia al volo con il tasto `F` durante il monitoraggio (Tutti → Solo attivi → Solo inattivi → Tutti), con feedback nel titolo della finestra. Non disponibile in modalità `-Summary`.
+
 ## [2.10.2]
 
 ### Corretto

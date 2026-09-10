@@ -62,6 +62,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Segnala se il percorso di rete verso un host cambia, controllato ogni 30 minuti
 .\Sping.ps1 vpn-remoto.contoso.local -TracePathChanges -PathTraceIntervalMinutes 30
 
+# Mostra solo gli host non raggiungibili (F per cambiare filtro al volo durante il monitoraggio)
+.\Sping.ps1 -ListName Core -DisplayFilter DownOnly
+
 # Interfaccia in italiano (default: inglese)
 .\Sping.ps1 -ListName Core -Language it
 
@@ -92,6 +95,7 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-TracePathChanges` | Ritraccia periodicamente il percorso verso ogni host (indipendente dal ciclo di ping e da `-TraceOnFailure`) con una sonda nativa non bloccante spalmata su più cicli, segnalando se il percorso cambia rispetto alla traccia precedente. Una riga dedicata della dashboard mostra live la traccia in corso (host, hop attuale, IP scoperti finora) o il conto alla rovescia alla prossima. Il dettaglio completo prima/dopo viene salvato in un file sotto `SpingData\pathtraces` |
 | `-PathTraceIntervalMinutes` | Solo con `-TracePathChanges`: minuti tra la fine di una traccia completata e l'inizio della successiva, per host (default 15) |
 | `-PathTraceMaxHops` | Solo con `-TracePathChanges`: numero massimo di hop da sondare prima di rinunciare a raggiungere la destinazione (default 20) |
+| `-DisplayFilter` | Quali host mostrare nella dashboard: `All` (default), `UpOnly` (solo raggiungibili), `DownOnly` (solo non raggiungibili). Gli host esclusi mantengono la loro riga, che resta vuota - le righe non si spostano mai. Cambia al volo con il tasto `F` durante il monitoraggio (Tutti → Solo attivi → Solo inattivi → Tutti). Non disponibile in modalità `-Summary` |
 | `-ListName` | Nome di una lista host salvata (combinabile con `ComputerName`) |
 | `-Domain` | Suffisso DNS aggiunto a ogni host |
 | `-Count` | Numero di cicli di ping (default: continuo) |
