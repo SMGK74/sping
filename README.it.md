@@ -81,7 +81,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare l'allarme sonoro/vocale (lo stato è visibile nel titolo della finestra), oppure `Q`/`Ctrl+C` per interrompere in modo pulito. Viene sempre stampato un riepilogo finale, senza errori di terminazione.
+Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare l'allarme sonoro/vocale (lo stato è visibile nel titolo della finestra), `F` per cambiare il filtro degli host mostrati (vedi `-DisplayFilter`), `R` per azzerare i contatori accumulati senza riavviare la sessione, oppure `Q`/`Ctrl+C` per interrompere in modo pulito. Viene sempre stampato un riepilogo finale, senza errori di terminazione.
 
 ## Parametri principali
 
@@ -95,7 +95,7 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-TracePathChanges` | Ritraccia periodicamente il percorso verso ogni host (indipendente dal ciclo di ping e da `-TraceOnFailure`) con una sonda nativa non bloccante spalmata su più cicli, segnalando se il percorso cambia rispetto alla traccia precedente. Una riga dedicata della dashboard mostra live la traccia in corso (host, hop attuale, IP scoperti finora) o il conto alla rovescia alla prossima. Il dettaglio completo prima/dopo viene salvato in un file sotto `SpingData\pathtraces` |
 | `-PathTraceIntervalMinutes` | Solo con `-TracePathChanges`: minuti tra la fine di una traccia completata e l'inizio della successiva, per host (default 15) |
 | `-PathTraceMaxHops` | Solo con `-TracePathChanges`: numero massimo di hop da sondare prima di rinunciare a raggiungere la destinazione (default 20) |
-| `-DisplayFilter` | Quali host mostrare nella dashboard: `All` (default), `UpOnly` (solo raggiungibili), `DownOnly` (solo non raggiungibili). Gli host esclusi mantengono la loro riga, che resta vuota - le righe non si spostano mai. Cambia al volo con il tasto `F` durante il monitoraggio (Tutti → Solo attivi → Solo inattivi → Tutti). Non disponibile in modalità `-Summary` |
+| `-DisplayFilter` | Quali host mostrare nella dashboard: `All` (default), `UpOnly` (solo raggiungibili), `DownOnly` (solo non raggiungibili). Con `UpOnly`/`DownOnly` la vista è compatta (senza buchi), ridisegnata quando l'insieme cambia, con un debounce pari a `ResumeThreshold` × `IntervalMillis` per non sfarfallare su reti instabili. Cambia al volo con il tasto `F` durante il monitoraggio (Tutti → Solo attivi → Solo inattivi → Tutti). Non disponibile in modalità `-Summary` |
 | `-ListName` | Nome di una lista host salvata (combinabile con `ComputerName`) |
 | `-Domain` | Suffisso DNS aggiunto a ogni host |
 | `-Count` | Numero di cicli di ping (default: continuo) |

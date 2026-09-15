@@ -81,7 +81,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-While monitoring: press `A` at any time to toggle the sound/voice alert on or off (status shown in the window title), or `Q`/`Ctrl+C` to stop cleanly. A final summary is always printed, with no terminating errors.
+While monitoring: press `A` at any time to toggle the sound/voice alert on or off (status shown in the window title), `F` to cycle which hosts are shown (see `-DisplayFilter`), `R` to reset accumulated counters without restarting the session, or `Q`/`Ctrl+C` to stop cleanly. A final summary is always printed, with no terminating errors.
 
 ## Main parameters
 
@@ -95,7 +95,7 @@ While monitoring: press `A` at any time to toggle the sound/voice alert on or of
 | `-TracePathChanges` | Periodically re-traces the route to every host (independent of the ping cycle and of `-TraceOnFailure`) with a native, non-blocking probe spread across several cycles, flagging it if the route differs from the previous trace. A dedicated dashboard row shows the trace live (host, current hop, IPs discovered so far) or a countdown to the next one. Full before/after detail is saved to a file under `SpingData\pathtraces` |
 | `-PathTraceIntervalMinutes` | Only with `-TracePathChanges`: minutes between the end of one completed trace and the start of the next, per host (default 15) |
 | `-PathTraceMaxHops` | Only with `-TracePathChanges`: maximum hops to probe before giving up on reaching the destination (default 20) |
-| `-DisplayFilter` | Which hosts to show in the dashboard: `All` (default), `UpOnly` (reachable only), `DownOnly` (unreachable only). Excluded hosts keep their row, left blank; rows never move. Cycle live with the `F` key during monitoring (All -> Up only -> Down only -> All). Not available in `-Summary` mode |
+| `-DisplayFilter` | Which hosts to show in the dashboard: `All` (default), `UpOnly` (reachable only), `DownOnly` (unreachable only). With `UpOnly`/`DownOnly` the view is compact (no gaps), redrawn when the set changes, with a debounce equal to `ResumeThreshold` x `IntervalMillis` to avoid flicker on unstable networks. Cycle live with the `F` key during monitoring (All -> Up only -> Down only -> All). Not available in `-Summary` mode |
 | `-ListName` | Name of a saved host list (can be combined with `ComputerName`) |
 | `-Domain` | DNS suffix appended to every host |
 | `-Count` | Number of ping cycles (default: continuous) |

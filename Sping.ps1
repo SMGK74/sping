@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.11.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.12.3 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -13,7 +13,9 @@
 
     Press Q or Ctrl+C at any time to stop cleanly - no terminating errors, a final summary is
     always printed. Press A at any time to toggle the sound/voice alert on or off (reflected in
-    the console window title).
+    the console window title). Press F to cycle which hosts are shown (all, reachable only,
+    unreachable only - see -DisplayFilter). Press R to reset all accumulated counters (sent,
+    received, lost, jitter) to zero without restarting the session.
 
 .PARAMETER ComputerName
     One or more hosts / IP addresses to ping (pinged in parallel every cycle). Besides plain
@@ -62,9 +64,12 @@
 
 .PARAMETER DisplayFilter
     Which hosts to show in the dashboard: All (default), UpOnly (only reachable hosts), or
-    DownOnly (only unreachable hosts). Hidden hosts keep their row but it is left blank - rows
-    never move, so switching filters can't disturb the layout. Cycle live with the F key during
-    monitoring (All -> UpOnly -> DownOnly -> All). Not available in -Summary mode.
+    DownOnly (only unreachable hosts). With UpOnly/DownOnly the view is compact (no gaps),
+    redrawn only when the visible set changes, using solely the row space already reserved at
+    startup (no extra Clear-Host, no buffer resize). Redraws are debounced to ResumeThreshold *
+    IntervalMillis to avoid flicker on flapping networks. Cycle live with the F key during
+    monitoring (All -> UpOnly -> DownOnly -> All), which also restores each host's original
+    position when returning to All. Not available in -Summary mode.
 
 .PARAMETER ListName
     Name of a previously saved host list to ping (can be combined with -ComputerName).
@@ -237,7 +242,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.11.0'
+$script:ScriptVersion = '2.12.3'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -361,7 +366,7 @@ $script:BuiltInStrings = @{
         ManyHostsWarning      = "Note: monitoring {0} hosts with one row each won't fit on a normal screen. Consider -Summary for a more compact view."
         ManyHostsPrompt       = "You're about to monitor {0} hosts in full dashboard mode, which likely won't fit on one screen. Switch to -Summary? [Y/n]: "
         MonitoringBanner      = "Sping - monitoring {0} hosts in parallel"
-        Instructions          = "Press Q or Ctrl+C to stop cleanly, A to toggle alerts on/off, F to cycle the host filter (All/Up only/Down only)."
+        Instructions          = "Press Q or Ctrl+C to stop cleanly, A to toggle alerts on/off, F to cycle the host filter (All/Up only/Down only), R to reset counters."
         LogPath               = "Log: {0}"
         LogDisabled           = "Log: disabled (use -Log or -LogFile to enable it)"
         ColHost               = "HOST"
@@ -419,7 +424,7 @@ $script:BuiltInStrings = @{
         ManyHostsWarning      = "Nota: monitorare {0} host con una riga ciascuno non entra in uno schermo normale. Valuta -Summary per una vista piu' compatta."
         ManyHostsPrompt       = "Stai per monitorare {0} host in modalita' completa, che probabilmente non entra in una schermata. Passare a -Summary? [S/n]: "
         MonitoringBanner      = "Sping - monitoraggio {0} host in parallelo"
-        Instructions          = "Premi Q oppure Ctrl+C per interrompere in modo pulito, A per attivare/disattivare gli avvisi, F per cambiare il filtro host (Tutti/Solo attivi/Solo inattivi)."
+        Instructions          = "Premi Q oppure Ctrl+C per interrompere in modo pulito, A per attivare/disattivare gli avvisi, F per cambiare il filtro host (Tutti/Solo attivi/Solo inattivi), R per azzerare i contatori."
         LogPath               = "Log: {0}"
         LogDisabled           = "Log: disattivato (usa -Log o -LogFile per attivarlo)"
         ColHost               = "HOST"
@@ -475,16 +480,18 @@ function Get-SpingStrings {
         }
     }
 
-    $merged = $script:BuiltInStrings['en'].Clone()
+    # Base del merge: il dizionario incorporato per la lingua richiesta, se nota, altrimenti l'inglese.
+    # Prima usava sempre l'inglese come base: una chiave nuova assente da un file cache piu' vecchio
+    # (creato da una versione precedente dello script) finiva quindi sempre in inglese anche con lingua
+    # italiana attiva, invece di ripiegare sull'italiano incorporato piu' recente.
+    $merged = if ($script:BuiltInStrings.ContainsKey($Language)) { $script:BuiltInStrings[$Language].Clone() } else { $script:BuiltInStrings['en'].Clone() }
     $langFile = Join-Path $LangDir "$Language.json"
     if (Test-Path $langFile) {
         try {
             $loaded = Get-Content $langFile -Raw | ConvertFrom-Json
             foreach ($prop in $loaded.PSObject.Properties) { $merged[$prop.Name] = $prop.Value }
         } catch { }
-    } elseif ($script:BuiltInStrings.ContainsKey($Language)) {
-        foreach ($k in $script:BuiltInStrings[$Language].Keys) { $merged[$k] = $script:BuiltInStrings[$Language][$k] }
-    } elseif ($Language -ne 'en') {
+    } elseif (-not $script:BuiltInStrings.ContainsKey($Language) -and $Language -ne 'en') {
         Write-Warning "Language '$Language' not found under $LangDir, falling back to English."
     }
     return $merged
@@ -1218,6 +1225,7 @@ $hostStates = foreach ($h in $targets) {
         PathChangedThisCycle = $false
         PathChangeOldHops = $null
         PathChangeNewHops = $null
+        OriginalRow = $null
     }
 }
 
@@ -1270,6 +1278,8 @@ function Format-DashboardRow {
 # quando si preme A. Il titolo della finestra (aggiornato anch'esso al toggle) non supporta testo colorato.
 $script:alertsEnabled = -not [bool]$DisableAlerts
 $script:displayFilter = $DisplayFilter
+$script:lastCompactHostNames = @()
+$script:lastCompactRedrawTime = $null
 $initialAlertText = if ($script:alertsEnabled) { $S.AlertsOn } else { $S.AlertsOff }
 $initialAlertColor = if ($script:alertsEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
 Write-Host (Format-DashboardRow $initialAlertText) -ForegroundColor $initialAlertColor
@@ -1330,6 +1340,7 @@ if (-not $Summary) {
     for ($i = 0; $i -lt $hostStates.Count; $i++) {
         $state = $hostStates[$i]
         $state | Add-Member -NotePropertyName Row -NotePropertyValue ($dashboardTop + $i) -Force
+        $state.OriginalRow = $dashboardTop + $i
         $placeholderArgs = @($state.Host, $state.ResolvedIp, $S.Waiting, '-', '-', 0, 0, 0, 0, 0)
         if ($showCertColumn) { $placeholderArgs += '-' }
         Write-Host (Format-DashboardRow ($rowFormat -f $placeholderArgs))
@@ -1399,6 +1410,53 @@ function Write-SpingHostRow {
     }
     $line = $rowFormat -f $rowArgs
     Write-DashboardLine -Row $State.Row -Text $line -Color (Get-StatusColor $State)
+}
+
+function Update-SpingCompactLayout {
+    param([switch]$ForceRedraw)
+
+    # Riusa esclusivamente lo spazio gia' riservato all'avvio (dashboardTop .. dashboardTop+hostStates.Count-1):
+    # non stampa mai piu' righe di quante ce ne fossero in origine, quindi nessun rischio di sforare il buffer
+    # o di dover ricalcolare l'altezza console. Nessun Clear-Host: solo le righe coinvolte vengono riscritte.
+    # Niente "switch" annidato dentro Where-Object: switch ridefinisce silenziosamente $_ al valore su cui
+    # sta facendo lo switch (qui, la stringa del filtro), non piu' all'host corrente della pipeline - motivo
+    # esatto per cui il filtro non funzionava (vedi CHANGELOG).
+    $matching = @($hostStates | Where-Object {
+        if ($script:displayFilter -eq 'UpOnly') { $_.Success }
+        elseif ($script:displayFilter -eq 'DownOnly') { -not $_.Success }
+        else { $true }
+    })
+    $matchingNames = @($matching | ForEach-Object { $_.Host })
+
+    $setChanged = $matchingNames.Count -ne $script:lastCompactHostNames.Count
+    if (-not $setChanged) {
+        for ($i = 0; $i -lt $matchingNames.Count; $i++) {
+            if ($matchingNames[$i] -ne $script:lastCompactHostNames[$i]) { $setChanged = $true; break }
+        }
+    }
+
+    # Debounce: non ridisegna piu' spesso di quanto impieghi un host a essere considerato "down" per davvero
+    # (ResumeThreshold cicli), cosi' una rete che flappa non fa sfarfallare la vista compatta in continuazione.
+    $debounceMs = [Math]::Max(1000, $ResumeThreshold * $IntervalMillis)
+    $debounceElapsed = (-not $script:lastCompactRedrawTime) -or (((Get-Date) - $script:lastCompactRedrawTime).TotalMilliseconds -ge $debounceMs)
+
+    if ($setChanged -and ($ForceRedraw -or $debounceElapsed)) {
+        for ($r = 0; $r -lt $hostStates.Count; $r++) { Write-DashboardLine -Row ($dashboardTop + $r) -Text '' }
+        for ($i = 0; $i -lt $matching.Count; $i++) {
+            $matching[$i].Row = $dashboardTop + $i
+            Write-SpingHostRow -State $matching[$i]
+        }
+        $script:lastCompactHostNames = $matchingNames
+        $script:lastCompactRedrawTime = Get-Date
+    } else {
+        # Il debounce non e' ancora scaduto: continua a mostrare l'ultimo insieme ridisegnato, aggiornando
+        # solo i dati live di quegli host (posizione invariata), anche se nel frattempo qualcuno e' entrato
+        # o uscito dal filtro - comparira'/sparira' al prossimo ridisegno.
+        foreach ($displayedName in $script:lastCompactHostNames) {
+            $s = $hostStates | Where-Object { $_.Host -eq $displayedName } | Select-Object -First 1
+            if ($s) { Write-SpingHostRow -State $s }
+        }
+    }
 }
 
 function Get-StatusColor {
@@ -1598,9 +1656,13 @@ try {
                 }
             }
 
-            if (-not $Summary) {
+            if (-not $Summary -and $script:displayFilter -eq 'All') {
                 Write-SpingHostRow -State $state
             }
+        }
+
+        if (-not $Summary -and $script:displayFilter -ne 'All') {
+            Update-SpingCompactLayout
         }
 
         if ($Summary) {
@@ -1636,13 +1698,43 @@ try {
                         'DownOnly' { 'All' }
                         default    { 'All' }
                     }
-                    foreach ($fState in $hostStates) { Write-SpingHostRow -State $fState }
+                    if ($script:displayFilter -eq 'All') {
+                        # Torna alla disposizione originale: libera tutto lo spazio riservato (potrebbe
+                        # contenere righe della vista compatta) e ripristina ogni host alla sua posizione
+                        # assegnata all'avvio.
+                        for ($r = 0; $r -lt $hostStates.Count; $r++) { Write-DashboardLine -Row ($dashboardTop + $r) -Text '' }
+                        foreach ($fState in $hostStates) {
+                            $fState.Row = $fState.OriginalRow
+                            Write-SpingHostRow -State $fState
+                        }
+                        $script:lastCompactHostNames = @()
+                        $script:lastCompactRedrawTime = $null
+                    } else {
+                        Update-SpingCompactLayout -ForceRedraw
+                    }
                     $filterLabel = switch ($script:displayFilter) {
                         'UpOnly'   { $script:S.FilterUpOnly }
                         'DownOnly' { $script:S.FilterDownOnly }
                         default    { $script:S.FilterAll }
                     }
                     try { $Host.UI.RawUI.WindowTitle = "Sping - $($script:S.FilterLabel): $filterLabel" } catch { }
+                } elseif ($key.Key -eq [System.ConsoleKey]::R) {
+                    foreach ($rState in $hostStates) {
+                        $rState.TotalSent = 0
+                        $rState.TotalReceived = 0
+                        $rState.TotalLost = 0
+                        $rState.ConsecutiveFails = 0
+                        $rState.Jitter = $null
+                        $rState.PrevRtt = $null
+                        $rState.TtlExpiredCount = 0
+                    }
+                    if (-not $Summary) {
+                        if ($script:displayFilter -eq 'All') {
+                            foreach ($rState in $hostStates) { Write-SpingHostRow -State $rState }
+                        } else {
+                            Update-SpingCompactLayout -ForceRedraw
+                        }
+                    }
                 }
             }
             $wait = [Math]::Min(50, $IntervalMillis - $elapsed)

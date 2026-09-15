@@ -4,6 +4,25 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.12.3]
+
+### Corretto
+- `-DisplayFilter UpOnly`/`DownOnly` non filtrava correttamente (in alcuni casi zero host risultavano corrispondere, in altri tutti): la causa era uno `switch` annidato dentro un blocco `Where-Object`, che ridefinisce silenziosamente `$_` al valore su cui sta facendo lo switch (la stringa del filtro) invece di lasciarlo riferito all'host corrente della pipeline - un'insidia nota ma sottile di PowerShell. Sostituito con un semplice `if`/`elseif` che non tocca `$_`.
+
+## [2.12.1]
+
+### Corretto
+- Le etichette nuove aggiunte in una versione più recente (es. quelle del filtro host) risultavano in inglese anche con lingua italiana attiva, se il file `SpingData\lang\it.json` era stato generato da una versione precedente dello script e non conteneva ancora quelle chiavi. Il merge ora parte dal dizionario italiano incorporato invece che da quello inglese, quindi le chiavi mancanti dal file cache ripiegano sull'italiano più recente. Le chiavi già presenti nel file (anche con testo superato) restano invariate per non sovrascrivere personalizzazioni: per un riallineamento completo, cancella `SpingData\lang\it.json` (e `en.json`) così si rigenerano da zero al prossimo avvio.
+
+## [2.12.0]
+
+### Aggiunto
+- `-DisplayFilter` (`UpOnly`/`DownOnly`) ora mostra una vista **compatta**, senza buchi tra gli host: quando l'insieme visibile cambia, le righe vengono ridisegnate riusando esclusivamente lo spazio già riservato all'avvio (nessun `Clear-Host`, nessun ricalcolo dell'altezza del buffer). Il ridisegno è limitato da un debounce pari a `ResumeThreshold` × `IntervalMillis`, per non sfarfallare su reti che flappano. Passare a `All` con il tasto `F` ripristina la disposizione originale di tutti gli host.
+- Tasto `R` durante il monitoraggio: azzera tutti i contatori accumulati per host (inviati, ricevuti, persi, fallimenti consecutivi, jitter) senza interrompere e rilanciare lo script.
+
+### Corretto
+- Il tasto `F` non compariva nella descrizione mostrata da `-Help` (era presente solo nelle istruzioni a runtime).
+
 ## [2.11.0]
 
 ### Aggiunto
