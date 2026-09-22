@@ -4,6 +4,11 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.15.0]
+
+### Modificato
+- `-MonitorMacAddress` non usa più `SendARP` (P/Invoke): il MAC risolto non corrispondeva a quello reale mostrato da `arp -a`, molto probabilmente perché `SendARP` con sorgente non specificata sceglie l'interfaccia di rete in autonomia, e su un PC con più adattatori (VMware, VPN) può scegliere quella sbagliata, restituendo il MAC di un dispositivo estraneo. Sostituito con `Get-NetNeighbor`, che legge la tabella di vicinato già popolata correttamente dal ping stesso (che passa necessariamente dall'interfaccia giusta), eliminando l'ambiguità alla radice - e nessun codice C# compilato da mantenere. Per host irraggiungibili, ora non viene più mostrato un MAC inventato.
+
 ## [2.14.5]
 
 ### Corretto

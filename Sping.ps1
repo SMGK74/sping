@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.14.5 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.15.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -72,14 +72,16 @@
     position when returning to All. Not available in -Summary mode.
 
 .PARAMETER MonitorMacAddress
-    Resolves the MAC address for each host's IP via ARP every cycle and flags it if it changes
-    from the previous one (possible IP conflict, replaced device, or ARP spoofing). ARP only
-    works for hosts on the same local network segment as the machine running the script - it
-    does not cross routers, so this is not meaningful for hosts reachable only over a WAN.
-    Adds MAC1..MACn columns to the dashboard (see -MacHistoryDepth): MAC1 is the first address
-    seen (green), each later distinct one fills the next column (red). A change also appends a
-    brief marker to STATO for that cycle and is logged in full to a timestamped file under
-    SpingData\macchanges, regardless of how many history columns are shown.
+    Reads each host's MAC address from Windows' own neighbor table (Get-NetNeighbor, requires the
+    NetTCPIP module - built into Windows 8/Server 2012 and later) every cycle, flagging it if it
+    changes from the previous one (possible IP conflict, replaced device, or ARP spoofing). Relies
+    on the ping traffic itself having already populated a correct entry through the right network
+    interface, so it only works for hosts on the same local network segment as the machine running
+    the script - it does not cross routers, so this is not meaningful for hosts reachable only over
+    a WAN. Adds MAC1..MACn columns to the dashboard (see -MacHistoryDepth): MAC1 is the first
+    address seen (green), each later distinct one fills the next column (red). A change also
+    appends a brief marker to STATO for that cycle and is logged in full to a timestamped file
+    under SpingData\macchanges, regardless of how many history columns are shown.
 
 .PARAMETER MacHistoryDepth
     Only relevant with -MonitorMacAddress. Number of MAC-history columns shown in the dashboard
@@ -263,7 +265,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.14.5'
+$script:ScriptVersion = '2.15.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -820,39 +822,22 @@ public static class SpingCertBypass
     $script:HttpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMillis)
 }
 
-if ($MonitorMacAddress) {
-    # SendARP (iphlpapi.dll) invece di "arp -a": nessun testo da interpretare (che sarebbe dipendente dalla
-    # lingua di Windows, come tracert), e vera classe .NET compilata - nessuna dipendenza da Runspace visto
-    # che qui non serve alcun callback, ma teniamo comunque lo stesso approccio collaudato di SpingCertBypass.
-    if (-not ('SpingArp' -as [type])) {
-        Add-Type -TypeDefinition @'
-using System;
-using System.Net;
-using System.Runtime.InteropServices;
-
-public static class SpingArp
-{
-    [DllImport("iphlpapi.dll", ExactSpelling = true)]
-    private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref uint macAddrLen);
-
-    public static string GetMacAddress(string ipAddress)
-    {
-        IPAddress ip;
-        if (!IPAddress.TryParse(ipAddress, out ip)) return null;
-        byte[] ipBytes = ip.GetAddressBytes();
-        if (ipBytes.Length != 4) return null;
-        if (BitConverter.IsLittleEndian) Array.Reverse(ipBytes);
-        uint destIp = BitConverter.ToUInt32(ipBytes, 0);
-        byte[] macAddr = new byte[6];
-        uint macAddrLen = (uint)macAddr.Length;
-        int result = SendARP(destIp, 0, macAddr, ref macAddrLen);
-        if (result != 0 || macAddrLen == 0) return null;
-        string[] macParts = new string[macAddrLen];
-        for (int i = 0; i < macAddrLen; i++) macParts[i] = macAddr[i].ToString("X2");
-        return string.Join(":", macParts);
-    }
-}
-'@ -ErrorAction Stop
+function Get-SpingMacAddress {
+    param([string]$IPAddress)
+    # Legge la tabella di vicinato che Windows ha gia' popolato correttamente (passando dall'interfaccia
+    # giusta) grazie al ping in corso verso questo stesso host - invece di forzare una nuova risoluzione ARP
+    # per conto nostro (SendARP), che su un PC con piu' adattatori di rete (es. VMware, VPN) puo' scegliere
+    # l'interfaccia sbagliata e restituire il MAC di un dispositivo completamente diverso.
+    try {
+        $neighbor = Get-NetNeighbor -IPAddress $IPAddress -ErrorAction Stop |
+            Where-Object { $_.State -notin @('Unreachable', 'Incomplete') } |
+            Select-Object -First 1
+        if ($neighbor -and $neighbor.LinkLayerAddress -and $neighbor.LinkLayerAddress -ne '00-00-00-00-00-00') {
+            return ($neighbor.LinkLayerAddress -replace '-', ':').ToUpper()
+        }
+        return $null
+    } catch {
+        return $null
     }
 }
 
@@ -1693,7 +1678,7 @@ try {
                 $state.MacChangedThisCycle = $false
                 if ($state.ResolvedIp -and $state.ResolvedIp -ne 'N/D') {
                     try {
-                        $state.MacAddress = [SpingArp]::GetMacAddress($state.ResolvedIp)
+                        $state.MacAddress = Get-SpingMacAddress -IPAddress $state.ResolvedIp
                     } catch {
                         $state.MacAddress = $null
                     }
