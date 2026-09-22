@@ -4,6 +4,33 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.14.5]
+
+### Fixed
+- The MAC address, correctly resolved by ARP, never reached the MAC1 column: the condition for saving the very first address checked the "truthiness" of the `MacHistory` list rather than its existence. In PowerShell an empty collection evaluates as false in a boolean context, even if the object itself exists and is valid: the list, being empty on the first cycle, failed exactly the check meant to handle that case, a logical deadlock that permanently prevented the first entry. Fixed by explicitly checking it isn't `$null`, instead of relying on the collection's implicit truthiness. The same pattern was also fixed in `-TracePathChanges`'s route comparison, where the practical risk was lower but the fix belongs there too for consistency.
+
+## [2.14.2]
+
+### Fixed
+- MAC always showed `-` even for hosts confirmed to be on the same local network segment (e.g. the gateway): `SendARP` was receiving the wrong IP address due to a byte-order issue. `IPAddress.GetAddressBytes()` returns bytes in network byte order, but `BitConverter.ToUInt32()` on a Windows PC (little-endian) reads them backwards without an explicit reversal - the same fix already applied elsewhere in the script for CIDR range expansion, forgotten in the new ARP C# code.
+
+## [2.14.1]
+
+### Fixed
+- MAC1/MAC2/MAC3 headers all showed "MAC1": the column format string was built by repeating a string with `* $MacHistoryDepth`, which in PowerShell repeats the same `{0}` placeholder instead of generating `{0}{1}{2}`. Fixed by building the format with increasing indices.
+- MAC columns stuck to the previous column with no gap (e.g. "TTLEXPMAC1"): the preceding numeric column, right-aligned, left no trailing margin. Added an explicit gap before the MAC columns everywhere they're drawn (header, placeholder, live row, final summary).
+
+## [2.14.0]
+
+### Added
+- `-MonitorMacAddress` now shows the MAC address directly in the dashboard instead of just a silent alert: MAC1..MACn columns (count reserved at startup, never added mid-session, to avoid recomputing the header and layout while monitoring is running - a risk we'd already learned to avoid with the CERT column). MAC1 is the first address ever seen for that host, always green; each later distinct address fills the next column in red, flagging a deviation from the baseline. Also shown in the final summary.
+- `-MacHistoryDepth` parameter (default 3) to decide how many columns to reserve. If changes exceed the reserved space, full detail is still logged to files under `SpingData\macchanges`.
+
+## [2.13.0]
+
+### Added
+- `-MonitorMacAddress` parameter: resolves each host's MAC address via ARP every cycle (native `SendARP` API, no language-dependent text parsing like `arp -a`), flagging a change from the previous one (possible IP conflict, replaced device, or ARP spoofing) with a STATUS marker, a live notice on a dedicated row, and a detail file under `SpingData\macchanges`. Only works for hosts on the same local network segment: ARP doesn't cross routers.
+
 ## [2.12.3]
 
 ### Fixed

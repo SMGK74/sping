@@ -65,6 +65,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Mostra solo gli host non raggiungibili (F per cambiare filtro al volo durante il monitoraggio)
 .\Sping.ps1 -ListName Core -DisplayFilter DownOnly
 
+# Segnala eventuali cambi di indirizzo MAC (conflitto IP) - solo per host sulla stessa rete locale
+.\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
+
 # Interfaccia in italiano (default: inglese)
 .\Sping.ps1 -ListName Core -Language it
 
@@ -96,6 +99,8 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-PathTraceIntervalMinutes` | Solo con `-TracePathChanges`: minuti tra la fine di una traccia completata e l'inizio della successiva, per host (default 15) |
 | `-PathTraceMaxHops` | Solo con `-TracePathChanges`: numero massimo di hop da sondare prima di rinunciare a raggiungere la destinazione (default 20) |
 | `-DisplayFilter` | Quali host mostrare nella dashboard: `All` (default), `UpOnly` (solo raggiungibili), `DownOnly` (solo non raggiungibili). Con `UpOnly`/`DownOnly` la vista è compatta (senza buchi), ridisegnata quando l'insieme cambia, con un debounce pari a `ResumeThreshold` × `IntervalMillis` per non sfarfallare su reti instabili. Cambia al volo con il tasto `F` durante il monitoraggio (Tutti → Solo attivi → Solo inattivi → Tutti). Non disponibile in modalità `-Summary` |
+| `-MonitorMacAddress` | Risolve via ARP l'indirizzo MAC di ogni host a ogni ciclo. Aggiunge colonne MAC1..MACn alla dashboard: MAC1 è il primo indirizzo visto (verde), ogni indirizzo diverso successivo riempie la colonna successiva (rosso), a segnalare una deviazione (possibile conflitto IP, dispositivo sostituito, o ARP spoofing). Funziona solo per host sullo stesso segmento di rete locale, dato che l'ARP non attraversa i router, quindi non è utile per host raggiungibili solo via WAN. Ogni cambio è comunque salvato per intero in un file sotto `SpingData\macchanges` |
+| `-MacHistoryDepth` | Solo con `-MonitorMacAddress`: quante colonne MAC1..MACn mostrare nella dashboard, riservate una volta sola all'avvio (default 3), mai aggiunte a metà sessione per non dover ricalcolare il layout durante il monitoraggio |
 | `-ListName` | Nome di una lista host salvata (combinabile con `ComputerName`) |
 | `-Domain` | Suffisso DNS aggiunto a ogni host |
 | `-Count` | Numero di cicli di ping (default: continuo) |

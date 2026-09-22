@@ -65,6 +65,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Show only unreachable hosts (F to cycle the filter live during monitoring)
 .\Sping.ps1 -ListName Core -DisplayFilter DownOnly
 
+# Flag MAC address changes (IP conflict) - only for hosts on the same local network
+.\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
+
 # Italian UI (default: English)
 .\Sping.ps1 -ListName Core -Language it
 
@@ -96,6 +99,8 @@ While monitoring: press `A` at any time to toggle the sound/voice alert on or of
 | `-PathTraceIntervalMinutes` | Only with `-TracePathChanges`: minutes between the end of one completed trace and the start of the next, per host (default 15) |
 | `-PathTraceMaxHops` | Only with `-TracePathChanges`: maximum hops to probe before giving up on reaching the destination (default 20) |
 | `-DisplayFilter` | Which hosts to show in the dashboard: `All` (default), `UpOnly` (reachable only), `DownOnly` (unreachable only). With `UpOnly`/`DownOnly` the view is compact (no gaps), redrawn when the set changes, with a debounce equal to `ResumeThreshold` x `IntervalMillis` to avoid flicker on unstable networks. Cycle live with the `F` key during monitoring (All -> Up only -> Down only -> All). Not available in `-Summary` mode |
+| `-MonitorMacAddress` | Resolves each host's MAC address via ARP every cycle. Adds MAC1..MACn columns to the dashboard: MAC1 is the first address seen (green), each later distinct one fills the next column (red), flagging a deviation (possible IP conflict, replaced device, or ARP spoofing). Only works for hosts on the same local network segment - ARP doesn't cross routers, so this is not useful for hosts reachable only over a WAN. Every change is still fully logged to a file under `SpingData\macchanges` |
+| `-MacHistoryDepth` | Only with `-MonitorMacAddress`: how many MAC1..MACn columns to show in the dashboard, reserved once at startup (default 3), never added mid-session to avoid recomputing the layout while running |
 | `-ListName` | Name of a saved host list (can be combined with `ComputerName`) |
 | `-Domain` | DNS suffix appended to every host |
 | `-Count` | Number of ping cycles (default: continuous) |

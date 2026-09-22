@@ -4,6 +4,33 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.14.5]
+
+### Corretto
+- Il MAC risolto correttamente da ARP non arrivava mai sulla colonna MAC1: la condizione per salvare il primissimo indirizzo controllava la "verità" della lista `MacHistory` invece che la sua esistenza. In PowerShell una collezione vuota viene valutata come falsa in un contesto booleano, anche se l'oggetto esiste ed è valido: la lista, essendo vuota al primo ciclo, falliva quel controllo proprio nel caso che doveva gestire, un cortocircuito logico che impediva per sempre il primo inserimento. Corretto controllando esplicitamente che non sia `$null`, invece di affidarsi alla verità implicita della collezione. Sistemato lo stesso schema anche nel confronto dei percorsi di `-TracePathChanges`, dove il rischio pratico era più basso ma la correzione va applicata comunque per coerenza.
+
+## [2.14.2]
+
+### Corretto
+- Il MAC risultava sempre `-` anche per host confermati sullo stesso segmento di rete locale (es. il gateway): `SendARP` riceveva un indirizzo IP sbagliato per un problema di ordine dei byte. `IPAddress.GetAddressBytes()` restituisce i byte in network byte order, ma `BitConverter.ToUInt32()` su un PC Windows (little-endian) li interpreta al contrario senza un'inversione esplicita, la stessa correzione già applicata altrove nello script per l'espansione dei range CIDR, dimenticata nel nuovo codice C# per l'ARP.
+
+## [2.14.1]
+
+### Corretto
+- Intestazioni MAC1/MAC2/MAC3 mostravano tutte "MAC1": il formato delle colonne era costruito ripetendo una stringa con `* $MacHistoryDepth`, che in PowerShell ripete lo stesso segnaposto `{0}` invece di generare `{0}{1}{2}`. Corretto costruendo il formato con indici crescenti.
+- Colonne MAC appiccicate alla colonna precedente senza spazio (es. "TTLEXPMAC1"): la colonna numerica precedente, allineata a destra, non lasciava margine finale. Aggiunto un distacco esplicito prima delle colonne MAC in tutti i punti in cui vengono disegnate (intestazione, placeholder, riga live, riepilogo finale).
+
+## [2.14.0]
+
+### Aggiunto
+- `-MonitorMacAddress` ora mostra l'indirizzo MAC direttamente in dashboard invece di limitarsi a un avviso: colonne MAC1..MACn (numero riservato all'avvio, mai aggiunte a metà sessione per evitare di dover ricalcolare intestazione e layout mentre gira il monitoraggio, un rischio che avevamo già imparato a evitare con la colonna CERT). MAC1 è il primo indirizzo visto per l'host, sempre verde; ogni indirizzo diverso successivo riempie la colonna successiva in rosso, segnalando una deviazione dalla base. Presente anche nel riepilogo finale.
+- Parametro `-MacHistoryDepth` (default 3) per decidere quante colonne riservare. Se i cambi superano lo spazio riservato, il dettaglio completo resta comunque nei file di log sotto `SpingData\macchanges`.
+
+## [2.13.0]
+
+### Aggiunto
+- Parametro `-MonitorMacAddress`: risolve via ARP (API nativa `SendARP`, nessun parsing di testo dipendente dalla lingua come `arp -a`) l'indirizzo MAC di ogni host a ogni ciclo, segnalando un cambiamento rispetto al precedente (possibile conflitto IP, dispositivo sostituito, o ARP spoofing) con un marcatore su STATO, una notifica live su riga dedicata, e un file di dettaglio sotto `SpingData\macchanges`. Funziona solo per host sullo stesso segmento di rete locale: l'ARP non attraversa i router.
+
 ## [2.12.3]
 
 ### Corretto

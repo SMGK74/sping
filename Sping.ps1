@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.12.3 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.14.5 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -70,6 +70,22 @@
     IntervalMillis to avoid flicker on flapping networks. Cycle live with the F key during
     monitoring (All -> UpOnly -> DownOnly -> All), which also restores each host's original
     position when returning to All. Not available in -Summary mode.
+
+.PARAMETER MonitorMacAddress
+    Resolves the MAC address for each host's IP via ARP every cycle and flags it if it changes
+    from the previous one (possible IP conflict, replaced device, or ARP spoofing). ARP only
+    works for hosts on the same local network segment as the machine running the script - it
+    does not cross routers, so this is not meaningful for hosts reachable only over a WAN.
+    Adds MAC1..MACn columns to the dashboard (see -MacHistoryDepth): MAC1 is the first address
+    seen (green), each later distinct one fills the next column (red). A change also appends a
+    brief marker to STATO for that cycle and is logged in full to a timestamped file under
+    SpingData\macchanges, regardless of how many history columns are shown.
+
+.PARAMETER MacHistoryDepth
+    Only relevant with -MonitorMacAddress. Number of MAC-history columns shown in the dashboard
+    (MAC1, MAC2, ...), reserved once at startup - never added mid-session, to avoid recomputing
+    the layout while running. Default: 3. Changes beyond this many are still fully logged to
+    SpingData\macchanges even though the dashboard only shows the first -MacHistoryDepth ones.
 
 .PARAMETER ListName
     Name of a previously saved host list to ping (can be combined with -ComputerName).
@@ -191,6 +207,9 @@
     .\Sping.ps1 -ListName Core -DisplayFilter DownOnly
 
 .EXAMPLE
+    .\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
+
+.EXAMPLE
     .\Sping.ps1 -ShowSettings -Language it
 #>
 [CmdletBinding()]
@@ -213,6 +232,8 @@ param(
     [int]$PathTraceMaxHops,
     [ValidateSet('All', 'UpOnly', 'DownOnly')]
     [string]$DisplayFilter,
+    [switch]$MonitorMacAddress,
+    [int]$MacHistoryDepth,
     [switch]$IgnoreCertificateErrors,
     [int]$CertWarningDays,
     [switch]$DisableAlerts,
@@ -242,7 +263,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.12.3'
+$script:ScriptVersion = '2.14.5'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -272,6 +293,7 @@ $script:LogDir     = Join-Path $ConfigDir 'logs'
 $script:LangDir    = Join-Path $ConfigDir 'lang'
 $script:TraceDir   = Join-Path $ConfigDir 'traces'
 $script:PathTraceDir = Join-Path $ConfigDir 'pathtraces'
+$script:MacChangeDir = Join-Path $ConfigDir 'macchanges'
 
 function Get-SpingConfig {
     # Rilevata dalla cultura UI di sistema solo alla creazione iniziale del file (primo avvio in assoluto):
@@ -388,6 +410,10 @@ $script:BuiltInStrings = @{
         PathChanged           = "Route changed for {0}"
         PathChangedSuffix     = "[ROUTE CHANGED]"
         PathChangeNoticesHeader = "Route changes detected (full before/after path saved to):"
+        MacChanged            = "MAC address changed for {0}"
+        MacChangedSuffix      = "[MAC CHANGED]"
+        MacChangeNoticesHeader = "MAC address changes detected (possible IP conflict, saved to):"
+        ColMacPrefix          = "MAC"
         PathTraceProgress     = "Tracing {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Next path trace: {0} in {1} min"
         FilterLabel           = "Filter"
@@ -446,6 +472,10 @@ $script:BuiltInStrings = @{
         PathChanged           = "Percorso cambiato per {0}"
         PathChangedSuffix     = "[PERCORSO CAMBIATO]"
         PathChangeNoticesHeader = "Cambi di percorso rilevati (percorso prima/dopo completo salvato in):"
+        MacChanged            = "Indirizzo MAC cambiato per {0}"
+        MacChangedSuffix      = "[MAC CAMBIATO]"
+        MacChangeNoticesHeader = "Cambi di indirizzo MAC rilevati (possibile conflitto IP, salvato in):"
+        ColMacPrefix          = "MAC"
         PathTraceProgress     = "Tracciamento {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Prossima traccia percorso: {0} tra {1} min"
         FilterLabel           = "Filtro"
@@ -710,6 +740,7 @@ if (-not $PSBoundParameters.ContainsKey('TraceCooldownMinutes') -or $TraceCooldo
 if (-not $PSBoundParameters.ContainsKey('MaxConcurrentTraces') -or $MaxConcurrentTraces -le 0) { $MaxConcurrentTraces = 5 }
 if (-not $PSBoundParameters.ContainsKey('PathTraceIntervalMinutes') -or $PathTraceIntervalMinutes -le 0) { $PathTraceIntervalMinutes = 15 }
 if (-not $PSBoundParameters.ContainsKey('PathTraceMaxHops') -or $PathTraceMaxHops -le 0) { $PathTraceMaxHops = 20 }
+if (-not $PSBoundParameters.ContainsKey('MacHistoryDepth') -or $MacHistoryDepth -le 0) { $MacHistoryDepth = 3 }
 
 # Merge -ComputerName with an optional saved -ListName
 $rawTargets = New-Object System.Collections.Generic.List[string]
@@ -787,6 +818,42 @@ public static class SpingCertBypass
     }
     $script:HttpClient = New-Object System.Net.Http.HttpClient($handler)
     $script:HttpClient.Timeout = [TimeSpan]::FromMilliseconds($TimeoutMillis)
+}
+
+if ($MonitorMacAddress) {
+    # SendARP (iphlpapi.dll) invece di "arp -a": nessun testo da interpretare (che sarebbe dipendente dalla
+    # lingua di Windows, come tracert), e vera classe .NET compilata - nessuna dipendenza da Runspace visto
+    # che qui non serve alcun callback, ma teniamo comunque lo stesso approccio collaudato di SpingCertBypass.
+    if (-not ('SpingArp' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Net;
+using System.Runtime.InteropServices;
+
+public static class SpingArp
+{
+    [DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern int SendARP(uint destIp, uint srcIp, byte[] macAddr, ref uint macAddrLen);
+
+    public static string GetMacAddress(string ipAddress)
+    {
+        IPAddress ip;
+        if (!IPAddress.TryParse(ipAddress, out ip)) return null;
+        byte[] ipBytes = ip.GetAddressBytes();
+        if (ipBytes.Length != 4) return null;
+        if (BitConverter.IsLittleEndian) Array.Reverse(ipBytes);
+        uint destIp = BitConverter.ToUInt32(ipBytes, 0);
+        byte[] macAddr = new byte[6];
+        uint macAddrLen = (uint)macAddr.Length;
+        int result = SendARP(destIp, 0, macAddr, ref macAddrLen);
+        if (result != 0 || macAddrLen == 0) return null;
+        string[] macParts = new string[macAddrLen];
+        for (int i = 0; i < macAddrLen; i++) macParts[i] = macAddr[i].ToString("X2");
+        return string.Join(":", macParts);
+    }
+}
+'@ -ErrorAction Stop
+    }
 }
 
 #endregion
@@ -1153,7 +1220,7 @@ function Start-SpingPathTraceStep {
 
     if ($reachedDestination -or $State.PathTraceHop -gt $MaxHops) {
         $newHops = @($State.PathTraceHops)
-        if ($State.LastPathHops) {
+        if ($null -ne $State.LastPathHops) {
             $oldHops = @($State.LastPathHops)
             $changed = $oldHops.Count -ne $newHops.Count
             if (-not $changed) {
@@ -1226,7 +1293,15 @@ $hostStates = foreach ($h in $targets) {
         PathChangeOldHops = $null
         PathChangeNewHops = $null
         OriginalRow = $null
+        MacAddress = $null
+        PreviousMacAddress = $null
+        MacChangedThisCycle = $false
+        MacHistory = $null
     }
+}
+
+if ($MonitorMacAddress) {
+    foreach ($state in $hostStates) { $state.MacHistory = New-Object System.Collections.Generic.List[string] }
 }
 
 # Risoluzione IP iniziale (best-effort), cosi' la colonna IP e' gia' popolata prima del primo ciclo.
@@ -1263,6 +1338,8 @@ if ($consoleWidth -lt 60) { $consoleWidth = 60 }
 $longestHost = ($hostStates | ForEach-Object { $_.Host.Length } | Measure-Object -Maximum).Maximum
 $hostColWidth = [Math]::Max(12, $longestHost + 2)
 $showCertColumn = ($Protocol -eq 'Https')
+$showMacColumns = [bool]$MonitorMacAddress
+$macColWidth = 19
 $rowFormat = if ($showCertColumn) {
     "{0,-$hostColWidth}{1,-15}{2,-16}{3,7}{4,11}{5,9}{6,10}{7,7}{8,6}{9,7}{10,9}"
 } else {
@@ -1286,24 +1363,33 @@ Write-Host (Format-DashboardRow $initialAlertText) -ForegroundColor $initialAler
 $script:alertsRow = 0
 
 $script:traceNoticeRow = $null
-if ($TraceOnFailure -and -not $Summary) {
-    Write-Host (Format-DashboardRow '')
-    $script:traceNoticeRow = 1
-}
-
 $script:pathChangeNoticeRow = $null
 $script:pathTraceProgressRow = $null
+$script:macChangeNoticeRow = $null
+$nextNoticeRow = 1
+if ($TraceOnFailure -and -not $Summary) {
+    Write-Host (Format-DashboardRow '')
+    $script:traceNoticeRow = $nextNoticeRow
+    $nextNoticeRow++
+}
 if ($TracePathChanges -and -not $Summary) {
     Write-Host (Format-DashboardRow '')
-    $script:pathChangeNoticeRow = if ($null -ne $script:traceNoticeRow) { 2 } else { 1 }
+    $script:pathChangeNoticeRow = $nextNoticeRow
+    $nextNoticeRow++
     Write-Host (Format-DashboardRow '')
-    $script:pathTraceProgressRow = $script:pathChangeNoticeRow + 1
+    $script:pathTraceProgressRow = $nextNoticeRow
+    $nextNoticeRow++
+}
+if ($MonitorMacAddress -and -not $Summary) {
+    Write-Host (Format-DashboardRow '')
+    $script:macChangeNoticeRow = $nextNoticeRow
+    $nextNoticeRow++
 }
 
 if (-not $Summary) {
     Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
-    $neededWidth = $hostColWidth + $(if ($showCertColumn) { 97 } else { 88 })
+    $neededWidth = $hostColWidth + $(if ($showCertColumn) { 97 } else { 88 }) + $(if ($showMacColumns) { ($macColWidth * $MacHistoryDepth) + 2 } else { 0 })
     if ($consoleWidth -lt $neededWidth) {
         $warnText = $S.WidthWarning -f $neededWidth
         if ($warnText.Length -gt $consoleWidth) { $warnText = $warnText.Substring(0, $consoleWidth) }
@@ -1334,7 +1420,13 @@ if (-not $Summary) {
 if (-not $Summary) {
     $headerArgs = @($S.ColHost, $S.ColIp, $S.ColStatus, $S.ColRtt, $S.ColJitter, $S.ColSent, $S.ColReceived, $S.ColLost, $S.ColLossPct, $S.ColTtlExp)
     if ($showCertColumn) { $headerArgs += $S.ColCertExp }
-    Write-Host (Format-DashboardRow ($rowFormat -f $headerArgs)) -ForegroundColor DarkGray
+    $macColFormat = ((0..($MacHistoryDepth - 1) | ForEach-Object { "{$_,-$macColWidth}" }) -join '')
+    $headerLine = $rowFormat -f $headerArgs
+    if ($showMacColumns) {
+        $macHeaderArgs = @(1..$MacHistoryDepth | ForEach-Object { "$($S.ColMacPrefix)$_" })
+        $headerLine += '  ' + ($macColFormat -f $macHeaderArgs)
+    }
+    Write-Host (Format-DashboardRow $headerLine) -ForegroundColor DarkGray
     Start-Sleep -Milliseconds 30   # lascia che il buffer/ConPTY si stabilizzi prima di leggere CursorTop
     $dashboardTop = [console]::CursorTop
     for ($i = 0; $i -lt $hostStates.Count; $i++) {
@@ -1343,7 +1435,12 @@ if (-not $Summary) {
         $state.OriginalRow = $dashboardTop + $i
         $placeholderArgs = @($state.Host, $state.ResolvedIp, $S.Waiting, '-', '-', 0, 0, 0, 0, 0)
         if ($showCertColumn) { $placeholderArgs += '-' }
-        Write-Host (Format-DashboardRow ($rowFormat -f $placeholderArgs))
+        $placeholderLine = $rowFormat -f $placeholderArgs
+        if ($showMacColumns) {
+            $macPlaceholderArgs = @(1..$MacHistoryDepth | ForEach-Object { '-' })
+            $placeholderLine += '  ' + ($macColFormat -f $macPlaceholderArgs)
+        }
+        Write-Host (Format-DashboardRow $placeholderLine)
     }
     if ($hostStates.Count -gt 40) {
         # Stampato DOPO tutte le righe host (non prima): le righe della dashboard, una volta create, restano
@@ -1409,7 +1506,22 @@ function Write-SpingHostRow {
         $rowArgs += $certDisplay
     }
     $line = $rowFormat -f $rowArgs
-    Write-DashboardLine -Row $State.Row -Text $line -Color (Get-StatusColor $State)
+    if (-not $showMacColumns) {
+        Write-DashboardLine -Row $State.Row -Text $line -Color (Get-StatusColor $State)
+        return
+    }
+    # Con le colonne MAC servono colori diversi nella stessa riga (verde per il primo indirizzo visto, rosso
+    # per ogni deviazione successiva): riusa Write-DashboardSegments, gia' pensata per esattamente questo.
+    $segments = New-Object System.Collections.Generic.List[object]
+    $segments.Add(@{ Text = $line; Color = (Get-StatusColor $State) })
+    $segments.Add(@{ Text = '  '; Color = [console]::ForegroundColor })
+    for ($i = 0; $i -lt $MacHistoryDepth; $i++) {
+        $cellText = if ($null -ne $State.MacHistory -and $i -lt $State.MacHistory.Count) { $State.MacHistory[$i] } else { '-' }
+        $cellColor = if ($i -eq 0) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
+        if ($cellText -eq '-') { $cellColor = [console]::ForegroundColor }
+        $segments.Add(@{ Text = ("{0,-$macColWidth}" -f $cellText); Color = $cellColor })
+    }
+    Write-DashboardSegments -Row $State.Row -Segments $segments
 }
 
 function Update-SpingCompactLayout {
@@ -1501,6 +1613,7 @@ $logWriter = $null
 $stopRequested = $false
 $script:TraceNotices = @()
 $script:PathChangeNotices = @()
+$script:MacChangeNotices = @()
 $script:ActiveTraceProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $previousTreatCtrlC = [console]::TreatControlCAsInput
 [console]::TreatControlCAsInput = $true
@@ -1575,6 +1688,47 @@ try {
             }
         }
 
+        if ($MonitorMacAddress) {
+            foreach ($state in $hostStates) {
+                $state.MacChangedThisCycle = $false
+                if ($state.ResolvedIp -and $state.ResolvedIp -ne 'N/D') {
+                    try {
+                        $state.MacAddress = [SpingArp]::GetMacAddress($state.ResolvedIp)
+                    } catch {
+                        $state.MacAddress = $null
+                    }
+                    if ($state.MacAddress -and $null -ne $state.MacHistory -and $state.MacHistory.Count -eq 0) {
+                        $state.MacHistory.Add($state.MacAddress)
+                    } elseif ($state.MacAddress -and $null -ne $state.MacHistory -and $state.MacHistory.Count -gt 0 -and $state.MacHistory[$state.MacHistory.Count - 1] -ne $state.MacAddress -and $state.MacHistory.Count -lt $MacHistoryDepth) {
+                        $state.MacHistory.Add($state.MacAddress)
+                    }
+                    if ($state.MacAddress -and $state.PreviousMacAddress -and $state.MacAddress -ne $state.PreviousMacAddress) {
+                        $state.MacChangedThisCycle = $true
+                        $noticeText = $S.MacChanged -f $state.Host
+                        if ($null -ne $script:macChangeNoticeRow) {
+                            Write-DashboardLine -Row $script:macChangeNoticeRow -Text $noticeText -Color ([System.ConsoleColor]::Yellow)
+                        }
+                        try {
+                            if (-not (Test-Path $script:MacChangeDir)) { New-Item -ItemType Directory -Path $script:MacChangeDir -Force | Out-Null }
+                            $safeName = $state.Host -replace '[:\\/*?"<>|]', '_'
+                            $macFile = Join-Path $script:MacChangeDir ("{0}_{1:yyyyMMdd_HHmmss}.txt" -f $safeName, (Get-Date))
+                            $lines = @(
+                                "Host: $($state.Host)",
+                                "IP: $($state.ResolvedIp)",
+                                "Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+                                '',
+                                "Previous MAC: $($state.PreviousMacAddress)",
+                                "New MAC: $($state.MacAddress)"
+                            )
+                            Set-Content -Path $macFile -Value $lines -Encoding UTF8
+                            $script:MacChangeNotices += "$($state.Host) -> $macFile"
+                        } catch { }
+                    }
+                    if ($state.MacAddress) { $state.PreviousMacAddress = $state.MacAddress }
+                }
+            }
+        }
+
         foreach ($state in $hostStates) {
 
             # Jitter: media mobile della variazione assoluta tra RTT consecutivi (stessa formula di RFC 3550/1889),
@@ -1587,6 +1741,9 @@ try {
 
             if ($state.PathChangedThisCycle) {
                 $state.StatusText += " $($S.PathChangedSuffix)"
+            }
+            if ($state.MacChangedThisCycle) {
+                $state.StatusText += " $($S.MacChangedSuffix)"
             }
 
             $state.TotalSent++
@@ -1761,7 +1918,13 @@ finally {
     }
     $summaryHeaderArgs = @($S.ColHost, $S.ColIp, $S.ColSent, $S.ColReceived, $S.ColLost, $S.ColLossPct, $S.ColTtlExp, $S.ColJitter)
     if ($showCertColumn) { $summaryHeaderArgs += $S.ColCertExp }
-    Write-Host ($summaryFormat -f $summaryHeaderArgs) -ForegroundColor DarkGray
+    $macColFormat = ((0..($MacHistoryDepth - 1) | ForEach-Object { "{$_,-$macColWidth}" }) -join '')
+    $summaryHeaderLine = $summaryFormat -f $summaryHeaderArgs
+    if ($showMacColumns) {
+        $macHeaderArgs = @(1..$MacHistoryDepth | ForEach-Object { "$($S.ColMacPrefix)$_" })
+        $summaryHeaderLine += '  ' + ($macColFormat -f $macHeaderArgs)
+    }
+    Write-Host $summaryHeaderLine -ForegroundColor DarkGray
     foreach ($state in $hostStates) {
         $lossPct = if ($state.TotalSent -gt 0) { [math]::Round(($state.TotalLost / $state.TotalSent) * 100, 1) } else { 0 }
         $jitterDisplay = if ($null -ne $state.Jitter) { [math]::Round($state.Jitter, 1) } else { '-' }
@@ -1775,6 +1938,12 @@ finally {
             $summaryLineArgs += $certDisplay
         }
         $line = $summaryFormat -f $summaryLineArgs
+        if ($showMacColumns) {
+            $macLineArgs = @(0..($MacHistoryDepth - 1) | ForEach-Object {
+                if ($null -ne $state.MacHistory -and $_ -lt $state.MacHistory.Count) { $state.MacHistory[$_] } else { '-' }
+            })
+            $line += '  ' + ($macColFormat -f $macLineArgs)
+        }
         Write-Host $line -ForegroundColor (Get-StatusColor $state)
     }
 
@@ -1788,6 +1957,11 @@ finally {
         Write-Host ''
         Write-Host $S.PathChangeNoticesHeader -ForegroundColor Yellow
         foreach ($notice in $script:PathChangeNotices) { Write-Host "  $notice" -ForegroundColor Yellow }
+    }
+    if ($script:MacChangeNotices.Count -gt 0) {
+        Write-Host ''
+        Write-Host $S.MacChangeNoticesHeader -ForegroundColor Yellow
+        foreach ($notice in $script:MacChangeNotices) { Write-Host "  $notice" -ForegroundColor Yellow }
     }
 }
 
