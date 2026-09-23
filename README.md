@@ -87,7 +87,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-While monitoring: press `A` at any time to toggle the sound/voice alert on or off (status shown in the window title), `F` to cycle which hosts are shown (see `-DisplayFilter`), `R` to reset accumulated counters without restarting the session, or `Q`/`Ctrl+C` to stop cleanly. A final summary is always printed, with no terminating errors.
+While monitoring, press `H` at any time to show/hide a panel listing every available command (`A` for alerts, `F` for the host filter, `R` to reset counters, `L` to toggle logging on or off without restarting the session, `Q`/`Ctrl+C` to stop cleanly). A final summary is always printed, with no terminating errors.
 
 ## Main parameters
 
@@ -120,7 +120,7 @@ While monitoring: press `A` at any time to toggle the sound/voice alert on or of
 | `-Summary` | Compact grid instead of one row per host, see `-SummaryColumns` |
 | `-SummaryColumns` | Only with `-Summary`: hosts per row in the compact grid (default 4) |
 | `-SoundFile` | WAV file played when a host recovers |
-| `-Log` / `-LogFile` | Enable logging (default or custom path) |
+| `-Log` / `-LogFile` | Enable logging (default or custom path). Can also be toggled live during monitoring with the `L` key, without restarting the session |
 | `-LogFormat` | `Csv` (default) or `Json`: the latter writes one compact JSON object per line (JSON Lines/NDJSON), suitable for ingestion by SIEM/monitoring tools, with more fields than the CSV (protocol, jitter, certificate days-to-expiry) |
 | `-LogRetentionDays` | If set, deletes files older than N days at startup (not during the session) from every `SpingData` subfolder that accumulates files over time (logs, traces, pathtraces, macchanges). Disabled by default: nothing is ever deleted unless this is explicitly set |
 | `-SaveAsDefault` | Save this run's parameters as the new defaults |
@@ -137,6 +137,8 @@ Settings, host lists, logs and language files persist as JSON, no longer in the 
 ## Language
 
 The UI starts in Italian if the system is in Italian, otherwise in English (auto-detected on first run). Use `-Language it`/`-Language en` to force it explicitly. On first run, the script generates `en.json` and `it.json` under `SpingData\lang\`: edit them, or copy one as a base to create a new one (e.g. `fr.json` with the same keys) to add another language, then call it with `-Language fr`.
+
+`en.json`/`it.json` are stamped with the script version that generated them. When you update the script, if that version differs from the existing file, it is automatically regenerated with the latest text (and you're notified on screen). Any manual customization made in that file needs to be redone after a script update - a language file for another language (e.g. `fr.json`) is never touched automatically, since there's no built-in text to compare it against.
 
 ## Dashboard colors
 

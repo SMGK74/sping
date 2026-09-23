@@ -4,6 +4,24 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.18.1]
+
+### Aggiunto
+- `en.json`/`it.json` ora vengono marcati con la versione dello script che li ha generati. Quando la versione in esecuzione differisce da quella nel file, viene rigenerato automaticamente con il testo incorporato più recente (con avviso a schermo), invece di restare bloccato per sempre al testo del momento in cui è stato creato - la causa esatta per cui titolo/istruzioni erano rimasti col testo vecchio dopo precedenti aggiornamenti. Un file di lingua per una lingua non incorporata (es. `fr.json`) non viene mai toccato automaticamente.
+
+## [2.18.0]
+
+### Aggiunto
+- Tasto `L`: attiva/disattiva la scrittura del log durante il monitoraggio, senza dover interrompere e rilanciare lo script. Se il logging era spento all'avvio, la prima attivazione determina lo stesso percorso predefinito che avrebbe usato `-Log`; le attivazioni successive nella stessa sessione riprendono sullo stesso file. Lo stato attuale (ON/OFF) è visibile in tempo reale nel titolo della finestra, insieme ad avvisi e filtro host.
+
+### Modificato
+- Semplificata l'intestazione iniziale: rimossa la riga statica sullo stato del log (ora ingannevole, dato che può cambiare durante la sessione) - lo stato attuale si vede nel titolo della finestra.
+
+## [2.17.0]
+
+### Aggiunto
+- Tasto `H`: mostra/nasconde un pannello con l'elenco di tutti i comandi disponibili, sotto la dashboard, senza toccare le righe fisse degli host. Sostituisce la riga di istruzioni all'avvio che cresceva a ogni nuova funzionalità (e soffriva dello stesso problema di cache della lingua già risolto altrove): ora la riga iniziale rimanda semplicemente a `H`.
+
 ## [2.16.0]
 
 ### Aggiunto

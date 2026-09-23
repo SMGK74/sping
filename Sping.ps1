@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.16.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.18.1 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -11,11 +11,9 @@
     are stored as JSON in a "SpingData" folder next to the script when that location is writable
     (fully portable - copy the whole folder anywhere), otherwise under %APPDATA%\SM-Script\Sping.
 
-    Press Q or Ctrl+C at any time to stop cleanly - no terminating errors, a final summary is
-    always printed. Press A at any time to toggle the sound/voice alert on or off (reflected in
-    the console window title). Press F to cycle which hosts are shown (all, reachable only,
-    unreachable only - see -DisplayFilter). Press R to reset all accumulated counters (sent,
-    received, lost, jitter) to zero without restarting the session.
+    Press H at any time during monitoring for an on-screen list of every available keyboard
+    shortcut (stop, alerts, host filter, counter reset, live logging toggle). Q or Ctrl+C always
+    stops cleanly, with no terminating errors and a final summary always printed.
 
 .PARAMETER ComputerName
     One or more hosts / IP addresses to ping (pinged in parallel every cycle). Besides plain
@@ -151,7 +149,9 @@
 
 .PARAMETER Log
     Enable logging to the default path (SpingData\logs next to the script, or %APPDATA%\SM-Script\Sping\logs
-    as fallback - see DESCRIPTION). Off by default. Format controlled by -LogFormat.
+    as fallback - see DESCRIPTION). Off by default. Format controlled by -LogFormat. Can also be turned on
+    or off live during monitoring with the L key, without restarting the session - if logging was off at
+    startup, pressing L determines and uses the same default path this parameter would have.
 
 .PARAMETER LogFile
     Enable logging to a specific path (implies -Log). Off by default.
@@ -275,7 +275,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.16.0'
+$script:ScriptVersion = '2.18.1'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -401,9 +401,7 @@ $script:BuiltInStrings = @{
         ManyHostsWarning      = "Note: monitoring {0} hosts with one row each won't fit on a normal screen. Consider -Summary for a more compact view."
         ManyHostsPrompt       = "You're about to monitor {0} hosts in full dashboard mode, which likely won't fit on one screen. Switch to -Summary? [Y/n]: "
         MonitoringBanner      = "Sping - monitoring {0} hosts in parallel"
-        Instructions          = "Press Q or Ctrl+C to stop cleanly, A to toggle alerts on/off, F to cycle the host filter (All/Up only/Down only), R to reset counters."
-        LogPath               = "Log: {0}"
-        LogDisabled           = "Log: disabled (use -Log or -LogFile to enable it)"
+        Instructions          = "Press H for the list of commands, Q or Ctrl+C to stop cleanly."
         ColHost               = "HOST"
         ColIp                 = "IP"
         ColStatus             = "STATUS"
@@ -428,6 +426,16 @@ $script:BuiltInStrings = @{
         MacChangeNoticesHeader = "MAC address changes detected (possible IP conflict, saved to):"
         ColMacPrefix          = "MAC"
         LogRotationDone       = "Log rotation: removed {0} file(s) older than {1} days"
+        HelpTitle             = "Available commands:"
+        HelpQuit              = "  Q / Ctrl+C  Stop cleanly"
+        HelpAlerts            = "  A           Toggle sound/voice alert on or off"
+        HelpFilter            = "  F           Cycle which hosts are shown (All / Up only / Down only)"
+        HelpReset             = "  R           Reset accumulated counters (sent, received, lost, jitter)"
+        HelpHelp              = "  H           Show/hide this help"
+        HelpLog               = "  L           Toggle logging on or off (does not restart the session)"
+        LangFileRefreshed     = "Language file updated to the latest text: {0} (redo any manual customization if you had made one)"
+        LogOn                 = "Log: ON"
+        LogOff                = "Log: OFF"
         PathTraceNextIn       = "Next path trace: {0} in {1} min"
         FilterLabel           = "Filter"
         FilterAll             = "All"
@@ -463,9 +471,7 @@ $script:BuiltInStrings = @{
         ManyHostsWarning      = "Nota: monitorare {0} host con una riga ciascuno non entra in uno schermo normale. Valuta -Summary per una vista piu' compatta."
         ManyHostsPrompt       = "Stai per monitorare {0} host in modalita' completa, che probabilmente non entra in una schermata. Passare a -Summary? [S/n]: "
         MonitoringBanner      = "Sping - monitoraggio {0} host in parallelo"
-        Instructions          = "Premi Q oppure Ctrl+C per interrompere in modo pulito, A per attivare/disattivare gli avvisi, F per cambiare il filtro host (Tutti/Solo attivi/Solo inattivi), R per azzerare i contatori."
-        LogPath               = "Log: {0}"
-        LogDisabled           = "Log: disattivato (usa -Log o -LogFile per attivarlo)"
+        Instructions          = "Premi H per l'elenco dei comandi, Q oppure Ctrl+C per interrompere in modo pulito."
         ColHost               = "HOST"
         ColIp                 = "IP"
         ColStatus             = "STATO"
@@ -490,6 +496,16 @@ $script:BuiltInStrings = @{
         MacChangeNoticesHeader = "Cambi di indirizzo MAC rilevati (possibile conflitto IP, salvato in):"
         ColMacPrefix          = "MAC"
         LogRotationDone       = "Rotazione log: rimossi {0} file più vecchi di {1} giorni"
+        HelpTitle             = "Comandi disponibili:"
+        HelpQuit              = "  Q / Ctrl+C  Interrompi in modo pulito"
+        HelpAlerts            = "  A           Attiva/disattiva l'allarme sonoro/vocale"
+        HelpFilter            = "  F           Cambia il filtro host mostrati (Tutti / Solo attivi / Solo inattivi)"
+        HelpReset             = "  R           Azzera i contatori accumulati (inviati, ricevuti, persi, jitter)"
+        HelpHelp              = "  H           Mostra/nascondi questa guida"
+        HelpLog               = "  L           Attiva/disattiva la scrittura del log (senza riavviare la sessione)"
+        LangFileRefreshed     = "File lingua aggiornato all'ultimo testo: {0} (rifai eventuali personalizzazioni manuali se ne avevi fatte)"
+        LogOn                 = "Log: ON"
+        LogOff                = "Log: OFF"
         PathTraceProgress     = "Tracciamento {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Prossima traccia percorso: {0} tra {1} min"
         FilterLabel           = "Filtro"
@@ -516,11 +532,18 @@ function Get-SpingStrings {
     }
 
     # Al primo avvio scrive i file delle lingue integrate (se assenti), cosi' l'utente puo' modificarli
-    # o copiarne uno come base per aggiungere altre lingue in SpingData\lang\<codice>.json.
+    # o copiarne uno come base per aggiungere altre lingue in SpingData\lang\<codice>.json. Ogni file viene
+    # marcato con la versione dello script che l'ha generato ("_GeneratedByVersion"): se una versione piu'
+    # recente rileva un file piu' vecchio, lo rigenera con il testo aggiornato invece di tenere per sempre
+    # etichette superate (era il problema esatto del titolo/istruzioni rimasti in inglese o col testo vecchio).
     foreach ($langCode in $script:BuiltInStrings.Keys) {
         $langFile = Join-Path $LangDir "$langCode.json"
         if (-not (Test-Path $langFile)) {
-            try { $script:BuiltInStrings[$langCode] | ConvertTo-Json | Set-Content -Path $langFile -Encoding UTF8 -ErrorAction Stop } catch { }
+            try {
+                $toWrite = $script:BuiltInStrings[$langCode].Clone()
+                $toWrite['_GeneratedByVersion'] = $script:ScriptVersion
+                $toWrite | ConvertTo-Json | Set-Content -Path $langFile -Encoding UTF8 -ErrorAction Stop
+            } catch { }
         }
     }
 
@@ -533,7 +556,23 @@ function Get-SpingStrings {
     if (Test-Path $langFile) {
         try {
             $loaded = Get-Content $langFile -Raw | ConvertFrom-Json
-            foreach ($prop in $loaded.PSObject.Properties) { $merged[$prop.Name] = $prop.Value }
+            $fileVersion = $loaded.'_GeneratedByVersion'
+            if ($script:BuiltInStrings.ContainsKey($Language) -and $fileVersion -ne $script:ScriptVersion) {
+                # File generato da una versione diversa (o precedente all'introduzione del marcatore stesso):
+                # rigenera da zero con il testo incorporato aggiornato. Eventuali personalizzazioni manuali
+                # nel file vengono perse a questo punto - da qui l'avviso, cosi' si sa che vanno rifatte.
+                $refreshed = $script:BuiltInStrings[$Language].Clone()
+                $refreshed['_GeneratedByVersion'] = $script:ScriptVersion
+                try {
+                    $refreshed | ConvertTo-Json | Set-Content -Path $langFile -Encoding UTF8 -ErrorAction Stop
+                    Write-Host ($script:BuiltInStrings[$Language]['LangFileRefreshed'] -f $langFile) -ForegroundColor DarkGray
+                } catch { }
+                $merged = $refreshed
+            } else {
+                foreach ($prop in $loaded.PSObject.Properties) {
+                    if ($prop.Name -ne '_GeneratedByVersion') { $merged[$prop.Name] = $prop.Value }
+                }
+            }
         } catch { }
     } elseif (-not $script:BuiltInStrings.ContainsKey($Language) -and $Language -ne 'en') {
         Write-Warning "Language '$Language' not found under $LangDir, falling back to English."
@@ -795,8 +834,10 @@ if ($targets.Count -eq 0) {
 $domainSuffix = if ($Domain) { if ($Domain.StartsWith('.')) { $Domain } else { ".$Domain" } } else { '' }
 
 # Logging is OFF by default. -Log turns it on with the default path, -LogFile turns it on with a custom path.
-$loggingEnabled = [bool]$Log -or $PSBoundParameters.ContainsKey('LogFile')
-if ($loggingEnabled -and -not $LogFile) {
+# Il percorso predefinito viene comunque calcolato anche se il logging parte disattivato, cosi' e' gia'
+# pronto se viene attivato piu' tardi con il tasto L.
+$script:loggingEnabled = [bool]$Log -or $PSBoundParameters.ContainsKey('LogFile')
+if (-not $LogFile) {
     if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
     $logExtension = if ($LogFormat -eq 'Json') { 'jsonl' } else { 'csv' }
     $LogFile = Join-Path $LogDir ("sping_{0:yyyyMMdd_HHmmss}.{1}" -f (Get-Date), $logExtension)
@@ -1440,7 +1481,6 @@ try {
 if (-not $Summary) {
     Write-Host "`n$($S.MonitoringBanner -f $hostStates.Count)" -ForegroundColor Cyan
     Write-Host $S.Instructions
-    if ($loggingEnabled) { Write-Host ($S.LogPath -f $LogFile) } else { Write-Host $S.LogDisabled }
     Write-Host ''
 }
 
@@ -1492,6 +1532,10 @@ if (-not $Summary) {
         Write-Host (Format-DashboardRow $placeholder)
     }
 }
+
+$script:helpAreaRow = if ($Summary) { $summaryTop + $gridRows.Count + 1 } else { $dashboardTop + $hostStates.Count + 1 }
+$script:helpVisible = $false
+$script:helpLineCount = 0
 
 function Write-DashboardLine {
     param([int]$Row, [string]$Text, [System.ConsoleColor]$Color = [console]::ForegroundColor)
@@ -1598,6 +1642,18 @@ function Update-SpingCompactLayout {
     }
 }
 
+function Get-SpingHelpLines {
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add($S.HelpTitle)
+    $lines.Add($S.HelpQuit)
+    $lines.Add($S.HelpAlerts)
+    if (-not $Summary) { $lines.Add($S.HelpFilter) }
+    $lines.Add($S.HelpReset)
+    $lines.Add($S.HelpLog)
+    $lines.Add($S.HelpHelp)
+    return $lines
+}
+
 function Get-StatusColor {
     param($State)
     # Priorita': FQDN non risolto (giallo) > esito ping. Sotto soglia i fallimenti sono arancione (perdita iniziale),
@@ -1636,7 +1692,7 @@ function Write-DashboardSegments {
 
 #region Main loop with clean Ctrl+C / Q handling --------------------------------
 
-$logWriter = $null
+$script:logWriter = $null
 $stopRequested = $false
 $script:TraceNotices = @()
 $script:PathChangeNotices = @()
@@ -1644,24 +1700,37 @@ $script:MacChangeNotices = @()
 $script:ActiveTraceProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $previousTreatCtrlC = [console]::TreatControlCAsInput
 [console]::TreatControlCAsInput = $true
-try {
-    $initialFilterLabel = switch ($script:displayFilter) {
-        'UpOnly'   { $S.FilterUpOnly }
-        'DownOnly' { $S.FilterDownOnly }
-        default    { $S.FilterAll }
+
+function Update-SpingWindowTitle {
+    $alertText = if ($script:alertsEnabled) { $script:S.AlertsOn } else { $script:S.AlertsOff }
+    $filterLabel = switch ($script:displayFilter) {
+        'UpOnly'   { $script:S.FilterUpOnly }
+        'DownOnly' { $script:S.FilterDownOnly }
+        default    { $script:S.FilterAll }
     }
-    $Host.UI.RawUI.WindowTitle = "Sping - $initialAlertText | $($S.FilterLabel): $initialFilterLabel"
-} catch { }
+    $logLabel = if ($script:loggingEnabled) { $script:S.LogOn } else { $script:S.LogOff }
+    try {
+        $Host.UI.RawUI.WindowTitle = "Sping - $alertText | $($script:S.FilterLabel): $filterLabel | $logLabel"
+    } catch { }
+}
+
+Update-SpingWindowTitle
+
+function Open-SpingLogWriter {
+    $logDirForFile = Split-Path $LogFile -Parent
+    if ($logDirForFile -and -not (Test-Path $logDirForFile)) { New-Item -ItemType Directory -Path $logDirForFile -Force | Out-Null }
+    $fileIsNew = -not (Test-Path $LogFile)
+    # Opened once per activation, not reopened every cycle. Append mode: se il logging viene disattivato e
+    # poi riattivato con L nella stessa sessione, riprende sullo stesso file invece di crearne uno nuovo.
+    $writer = New-Object System.IO.StreamWriter($LogFile, $true, [System.Text.Encoding]::UTF8)
+    $writer.AutoFlush = $true
+    if ($fileIsNew -and $LogFormat -ne 'Json') { $writer.WriteLine('Timestamp,Cycle,Host,ResolvedIp,Status,RoundtripMs,ConsecutiveFails,TotalSent,TotalReceived,TotalLost') }
+    return $writer
+}
 
 try {
-    if ($loggingEnabled) {
-        $logDirForFile = Split-Path $LogFile -Parent
-        if ($logDirForFile -and -not (Test-Path $logDirForFile)) { New-Item -ItemType Directory -Path $logDirForFile -Force | Out-Null }
-        $fileIsNew = -not (Test-Path $LogFile)
-        # Opened once, here, not reopened every cycle.
-        $logWriter = New-Object System.IO.StreamWriter($LogFile, $true, [System.Text.Encoding]::UTF8)
-        $logWriter.AutoFlush = $true
-        if ($fileIsNew -and $LogFormat -ne 'Json') { $logWriter.WriteLine('Timestamp,Cycle,Host,ResolvedIp,Status,RoundtripMs,ConsecutiveFails,TotalSent,TotalReceived,TotalLost') }
+    if ($script:loggingEnabled) {
+        $script:logWriter = Open-SpingLogWriter
     }
 
     for ($cycle = 1; $cycle -le $Count -and -not $stopRequested; $cycle++) {
@@ -1806,7 +1875,7 @@ try {
                 if ($state.StatusText -eq 'TtlExpired') { $state.TtlExpiredCount++ }
             }
 
-            if ($loggingEnabled) {
+            if ($script:loggingEnabled) {
                 $rttForLog = if ($null -ne $state.LastRtt) { $state.LastRtt } else { $null }
                 if ($LogFormat -eq 'Json') {
                     # JSON Lines (NDJSON): un oggetto JSON compatto per riga, pensato per l'ingestione in
@@ -1832,9 +1901,9 @@ try {
                         totalLost        = $state.TotalLost
                         certDaysToExpiry = $certDaysForLog
                     }
-                    $logWriter.WriteLine(($logEntry | ConvertTo-Json -Compress))
+                    $script:logWriter.WriteLine(($logEntry | ConvertTo-Json -Compress))
                 } else {
-                    $logWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}' -f `
+                    $script:logWriter.WriteLine(('{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}' -f `
                         (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $cycle, $state.Host, $state.ResolvedIp, $state.StatusText, `
                         $(if ($null -ne $rttForLog) { $rttForLog } else { '' }), $state.ConsecutiveFails, $state.TotalSent, $state.TotalReceived, $state.TotalLost))
                 }
@@ -1874,7 +1943,7 @@ try {
                     $alertColor = if ($script:alertsEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
                     $alertText  = if ($script:alertsEnabled) { $script:S.AlertsOn } else { $script:S.AlertsOff }
                     Write-DashboardLine -Row $script:alertsRow -Text $alertText -Color $alertColor
-                    try { $Host.UI.RawUI.WindowTitle = "Sping - $alertText" } catch { }
+                    Update-SpingWindowTitle
                 } elseif ($key.Key -eq [System.ConsoleKey]::F -and -not $Summary) {
                     $script:displayFilter = switch ($script:displayFilter) {
                         'All'      { 'UpOnly' }
@@ -1896,12 +1965,7 @@ try {
                     } else {
                         Update-SpingCompactLayout -ForceRedraw
                     }
-                    $filterLabel = switch ($script:displayFilter) {
-                        'UpOnly'   { $script:S.FilterUpOnly }
-                        'DownOnly' { $script:S.FilterDownOnly }
-                        default    { $script:S.FilterAll }
-                    }
-                    try { $Host.UI.RawUI.WindowTitle = "Sping - $($script:S.FilterLabel): $filterLabel" } catch { }
+                    Update-SpingWindowTitle
                 } elseif ($key.Key -eq [System.ConsoleKey]::R) {
                     foreach ($rState in $hostStates) {
                         $rState.TotalSent = 0
@@ -1919,6 +1983,38 @@ try {
                             Update-SpingCompactLayout -ForceRedraw
                         }
                     }
+                } elseif ($key.Key -eq [System.ConsoleKey]::L) {
+                    $script:loggingEnabled = -not $script:loggingEnabled
+                    if ($script:loggingEnabled) {
+                        try {
+                            $script:logWriter = Open-SpingLogWriter
+                        } catch {
+                            # Non si e' riusciti ad aprire il file (es. percorso non scrivibile): resta disattivato
+                            # invece di lasciare lo stato incoerente con "ON" ma nessun writer valido.
+                            $script:loggingEnabled = $false
+                            $script:logWriter = $null
+                        }
+                    } else {
+                        if ($script:logWriter) {
+                            try { $script:logWriter.Flush(); $script:logWriter.Close(); $script:logWriter.Dispose() } catch { }
+                            $script:logWriter = $null
+                        }
+                    }
+                    Update-SpingWindowTitle
+                } elseif ($key.Key -eq [System.ConsoleKey]::H) {
+                    $script:helpVisible = -not $script:helpVisible
+                    $helpLines = Get-SpingHelpLines
+                    if ($script:helpVisible) {
+                        for ($i = 0; $i -lt $helpLines.Count; $i++) {
+                            Write-DashboardLine -Row ($script:helpAreaRow + $i) -Text $helpLines[$i] -Color ([System.ConsoleColor]::Cyan)
+                        }
+                        $script:helpLineCount = $helpLines.Count
+                    } else {
+                        for ($i = 0; $i -lt $script:helpLineCount; $i++) {
+                            Write-DashboardLine -Row ($script:helpAreaRow + $i) -Text ''
+                        }
+                        $script:helpLineCount = 0
+                    }
                 }
             }
             $wait = [Math]::Min(50, $IntervalMillis - $elapsed)
@@ -1929,9 +2025,13 @@ try {
 }
 finally {
     [console]::TreatControlCAsInput = $previousTreatCtrlC
-    if ($logWriter) { $logWriter.Flush(); $logWriter.Close(); $logWriter.Dispose() }
+    if ($script:logWriter) { $script:logWriter.Flush(); $script:logWriter.Close(); $script:logWriter.Dispose() }
     if ($script:HttpClient) { $script:HttpClient.Dispose() }
 
+    try {
+        $safeRow = $script:helpAreaRow + [Math]::Max($script:helpLineCount, 0) + 1
+        [console]::SetCursorPosition(0, $safeRow)
+    } catch { }
     Write-Host "`n`n$($S.MonitoringEnded)" -ForegroundColor Cyan
 
     # Riepilogo finale con le stesse colonne/larghezza/colori della dashboard, per coerenza visiva.
@@ -1974,7 +2074,7 @@ finally {
         Write-Host $line -ForegroundColor (Get-StatusColor $state)
     }
 
-    if ($loggingEnabled) { Write-Host ($S.LogSavedTo -f $LogFile) }
+    if ($script:loggingEnabled) { Write-Host ($S.LogSavedTo -f $LogFile) }
     if ($script:TraceNotices.Count -gt 0) {
         Write-Host ''
         Write-Host $S.TraceNoticesHeader -ForegroundColor DarkGray

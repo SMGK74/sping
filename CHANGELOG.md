@@ -4,6 +4,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.18.1]
+
+### Added
+- `en.json`/`it.json` are now stamped with the script version that generated them. When the running version differs from the one in the file, it's automatically regenerated with the latest built-in text (with an on-screen notice), instead of staying stuck forever with whatever text existed when it was first created - the exact cause of the title/instructions staying on old wording after previous updates. A language file for a non-built-in language (e.g. `fr.json`) is never touched automatically.
+
+## [2.18.0]
+
+### Added
+- `L` key: toggles logging on or off during monitoring, without stopping and restarting the script. If logging was off at startup, the first activation determines the same default path `-Log` would have used; later activations in the same session resume on the same file. The current state (ON/OFF) is shown live in the window title, alongside alerts and the host filter.
+
+### Changed
+- Simplified the startup banner: removed the static log-status line (now misleading, since it can change during the session) - the current state is shown in the window title instead.
+
+## [2.17.0]
+
+### Added
+- `H` key: shows/hides a panel listing every available command, below the dashboard, without touching the fixed host rows. Replaces the startup instructions line that kept growing with every new feature (and suffered from the same language-cache issue already fixed elsewhere): the startup line now simply points to `H`.
+
 ## [2.16.0]
 
 ### Added

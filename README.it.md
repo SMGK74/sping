@@ -87,7 +87,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare l'allarme sonoro/vocale (lo stato è visibile nel titolo della finestra), `F` per cambiare il filtro degli host mostrati (vedi `-DisplayFilter`), `R` per azzerare i contatori accumulati senza riavviare la sessione, oppure `Q`/`Ctrl+C` per interrompere in modo pulito. Viene sempre stampato un riepilogo finale, senza errori di terminazione.
+Durante il monitoraggio, premi `H` in qualsiasi momento per mostrare/nascondere un pannello con tutti i comandi disponibili (`A` per gli avvisi, `F` per il filtro host, `R` per azzerare i contatori, `L` per attivare/disattivare la scrittura del log senza riavviare la sessione, `Q`/`Ctrl+C` per interrompere in modo pulito). Viene sempre stampato un riepilogo finale, senza errori di terminazione.
 
 ## Parametri principali
 
@@ -120,7 +120,7 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-Summary` | Griglia compatta invece di una riga per host, vedi `-SummaryColumns` |
 | `-SummaryColumns` | Solo con `-Summary`: numero di host per riga nella griglia compatta (default 4) |
 | `-SoundFile` | WAV riprodotto al ripristino di un host |
-| `-Log` / `-LogFile` | Abilita il logging (default o percorso custom) |
+| `-Log` / `-LogFile` | Abilita il logging (default o percorso custom). Attivabile/disattivabile anche al volo durante il monitoraggio con il tasto `L`, senza riavviare la sessione |
 | `-LogFormat` | `Csv` (default) o `Json`: quest'ultimo scrive un oggetto JSON compatto per riga (JSON Lines/NDJSON), adatto all'ingestione da parte di strumenti SIEM/monitoring, con più campi del CSV (protocollo, jitter, giorni alla scadenza del certificato) |
 | `-LogRetentionDays` | Se impostato, cancella all'avvio (non durante la sessione) i file più vecchi di N giorni da tutte le sottocartelle di `SpingData` che accumulano file nel tempo (log, trace, pathtraces, macchanges). Disattivato di default: nessuna cancellazione automatica se non lo richiedi esplicitamente |
 | `-SaveAsDefault` | Salva i parametri di questa esecuzione come nuovi default |
@@ -137,6 +137,8 @@ Impostazioni, liste host, log e file di lingua persistono come JSON, non più ne
 ## Lingua
 
 L'interfaccia parte in italiano se il sistema è in italiano, altrimenti in inglese (rilevato automaticamente al primo avvio). Con `-Language it`/`-Language en` puoi forzarla esplicitamente. Al primo avvio, lo script genera i file `en.json` e `it.json` dentro `SpingData\lang\`: puoi modificarli, oppure copiarne uno come base e crearne uno nuovo (es. `fr.json` con le stesse chiavi) per aggiungere un'altra lingua, basta poi richiamarlo con `-Language fr`.
+
+`en.json`/`it.json` sono marcati con la versione dello script che li ha generati. Quando aggiorni lo script, se rilevi che quella versione è cambiata rispetto al file esistente, viene rigenerato automaticamente con il testo più recente (e te ne avvisa a schermo). Eventuali personalizzazioni manuali fatte in quel file vanno quindi rifatte dopo un aggiornamento dello script - un file di lingua creato per un'altra lingua (es. `fr.json`) non viene mai toccato automaticamente, dato che non c'è un testo incorporato con cui confrontarlo.
 
 ## Colori dashboard
 
