@@ -4,6 +4,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.16.0]
+
+### Added
+- `-LogRetentionDays` parameter: if set, deletes files older than N days once at startup (not during the session) from every `SpingData` subfolder that accumulates files over time, not just CSV/JSON logs but also traceroute, path tracing, and MAC change files. Disabled by default, persists with `-SaveAsDefault` like other workflow settings.
+
 ## [2.15.0]
 
 ### Changed

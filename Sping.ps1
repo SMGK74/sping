@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.15.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.16.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -163,6 +163,12 @@
     when available. The default log filename extension matches the format (.csv or .jsonl) unless
     -LogFile sets an explicit path.
 
+.PARAMETER LogRetentionDays
+    If set, deletes files older than this many days from every SpingData subfolder that
+    accumulates files over time (logs, traces, pathtraces, macchanges) once at startup - not
+    continuously during the session. Disabled by default (nothing is ever deleted unless this is
+    explicitly set). A brief summary of how many files were removed is shown if any were.
+
 .PARAMETER SaveAsDefault
     Persist the numeric/behavioural parameters given on this run as the new defaults.
 
@@ -212,6 +218,9 @@
     .\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
 
 .EXAMPLE
+    .\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
+
+.EXAMPLE
     .\Sping.ps1 -ShowSettings -Language it
 #>
 [CmdletBinding()]
@@ -251,6 +260,7 @@ param(
     [string]$LogFile,
     [ValidateSet('Csv', 'Json')]
     [string]$LogFormat,
+    [int]$LogRetentionDays,
     [switch]$SaveAsDefault,
     [switch]$ShowSettings,
     [switch]$ShowLists,
@@ -265,7 +275,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.15.0'
+$script:ScriptVersion = '2.16.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -311,6 +321,7 @@ function Get-SpingConfig {
         Summary         = $false
         SummaryColumns  = 4
         LogFormat       = 'Csv'
+        LogRetentionDays = 0
         DisplayFilter   = 'All'
         SoundFile       = 'resume.wav'
         Protocol        = 'Icmp'
@@ -416,7 +427,7 @@ $script:BuiltInStrings = @{
         MacChangedSuffix      = "[MAC CHANGED]"
         MacChangeNoticesHeader = "MAC address changes detected (possible IP conflict, saved to):"
         ColMacPrefix          = "MAC"
-        PathTraceProgress     = "Tracing {0}: hop {1}/{2} -> {3}"
+        LogRotationDone       = "Log rotation: removed {0} file(s) older than {1} days"
         PathTraceNextIn       = "Next path trace: {0} in {1} min"
         FilterLabel           = "Filter"
         FilterAll             = "All"
@@ -478,6 +489,7 @@ $script:BuiltInStrings = @{
         MacChangedSuffix      = "[MAC CAMBIATO]"
         MacChangeNoticesHeader = "Cambi di indirizzo MAC rilevati (possibile conflitto IP, salvato in):"
         ColMacPrefix          = "MAC"
+        LogRotationDone       = "Rotazione log: rimossi {0} file più vecchi di {1} giorni"
         PathTraceProgress     = "Tracciamento {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Prossima traccia percorso: {0} tra {1} min"
         FilterLabel           = "Filtro"
@@ -694,6 +706,7 @@ if (-not $PSBoundParameters.ContainsKey('SoundFile'))        { $SoundFile      =
 if (-not $PSBoundParameters.ContainsKey('Summary'))          { $Summary        = [bool]$cfg.Summary }
 if (-not $PSBoundParameters.ContainsKey('SummaryColumns') -or $SummaryColumns -le 0) { $SummaryColumns = if ($cfg.SummaryColumns) { $cfg.SummaryColumns } else { 4 } }
 if (-not $PSBoundParameters.ContainsKey('LogFormat')) { $LogFormat = if ($cfg.LogFormat) { $cfg.LogFormat } else { 'Csv' } }
+if (-not $PSBoundParameters.ContainsKey('LogRetentionDays')) { $LogRetentionDays = if ($cfg.LogRetentionDays) { $cfg.LogRetentionDays } else { 0 } }
 if (-not $PSBoundParameters.ContainsKey('DisplayFilter')) { $DisplayFilter = if ($cfg.DisplayFilter) { $cfg.DisplayFilter } else { 'All' } }
 if (-not $PSBoundParameters.ContainsKey('Protocol'))         { $Protocol       = $cfg.Protocol }
 if (-not $Protocol) { $Protocol = 'Icmp' }
@@ -727,6 +740,7 @@ if ($SaveAsDefault) {
     $cfg.Summary         = [bool]$Summary
     $cfg.SummaryColumns  = $SummaryColumns
     $cfg.LogFormat       = $LogFormat
+    $cfg.LogRetentionDays = $LogRetentionDays
     $cfg.DisplayFilter   = $DisplayFilter
     $cfg.Protocol        = $Protocol
     $cfg.Port            = $Port
@@ -1237,6 +1251,34 @@ function Invoke-ResumeAlert {
         $synth.SpeakAsync(($script:S.ResumeSpeech -f $TargetHost)) | Out-Null
     } catch {
         1..3 | ForEach-Object { [console]::Beep(900, 250) }
+    }
+}
+
+#endregion
+
+#region Log rotation -----------------------------------------------------------
+
+function Invoke-SpingLogRotation {
+    param([string]$Directory, [int]$RetentionDays)
+    if (-not (Test-Path $Directory)) { return 0 }
+    $cutoff = (Get-Date).AddDays(-$RetentionDays)
+    $removed = 0
+    Get-ChildItem -Path $Directory -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -lt $cutoff } | ForEach-Object {
+        try { Remove-Item -Path $_.FullName -Force -ErrorAction Stop; $removed++ } catch { }
+    }
+    return $removed
+}
+
+if ($LogRetentionDays -gt 0) {
+    # Una sola volta all'avvio, non durante la sessione: piu' semplice e prevedibile. Si applica a tutte le
+    # sottocartelle di SpingData che accumulano file nel tempo, non solo ai log CSV/JSON.
+    $rotatedTotal = 0
+    $rotatedTotal += Invoke-SpingLogRotation -Directory $LogDir -RetentionDays $LogRetentionDays
+    $rotatedTotal += Invoke-SpingLogRotation -Directory $script:TraceDir -RetentionDays $LogRetentionDays
+    $rotatedTotal += Invoke-SpingLogRotation -Directory $script:PathTraceDir -RetentionDays $LogRetentionDays
+    $rotatedTotal += Invoke-SpingLogRotation -Directory $script:MacChangeDir -RetentionDays $LogRetentionDays
+    if ($rotatedTotal -gt 0) {
+        Write-Host ($S.LogRotationDone -f $rotatedTotal, $LogRetentionDays) -ForegroundColor DarkGray
     }
 }
 

@@ -4,6 +4,11 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.16.0]
+
+### Aggiunto
+- Parametro `-LogRetentionDays`: se impostato, cancella una sola volta all'avvio (non durante la sessione) i file più vecchi di N giorni da tutte le sottocartelle di `SpingData` che accumulano file nel tempo, non solo i log CSV/JSON ma anche traceroute, tracciamento percorsi e cambi MAC. Disattivato di default, persiste con `-SaveAsDefault` come le altre impostazioni di flusso di lavoro.
+
 ## [2.15.0]
 
 ### Modificato

@@ -68,6 +68,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Flag MAC address changes (IP conflict) - only for hosts on the same local network
 .\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
 
+# Keep logs tidy: delete files older than 30 days at startup (saved as a setting)
+.\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
+
 # Italian UI (default: English)
 .\Sping.ps1 -ListName Core -Language it
 
@@ -119,6 +122,7 @@ While monitoring: press `A` at any time to toggle the sound/voice alert on or of
 | `-SoundFile` | WAV file played when a host recovers |
 | `-Log` / `-LogFile` | Enable logging (default or custom path) |
 | `-LogFormat` | `Csv` (default) or `Json`: the latter writes one compact JSON object per line (JSON Lines/NDJSON), suitable for ingestion by SIEM/monitoring tools, with more fields than the CSV (protocol, jitter, certificate days-to-expiry) |
+| `-LogRetentionDays` | If set, deletes files older than N days at startup (not during the session) from every `SpingData` subfolder that accumulates files over time (logs, traces, pathtraces, macchanges). Disabled by default: nothing is ever deleted unless this is explicitly set |
 | `-SaveAsDefault` | Save this run's parameters as the new defaults |
 | `-ShowSettings` / `-ShowLists` | Show saved settings/lists and exit |
 | `-SaveList` / `-RemoveList` | Save or delete a host list under `-ListName` |

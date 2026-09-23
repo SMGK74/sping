@@ -68,6 +68,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # Segnala eventuali cambi di indirizzo MAC (conflitto IP) - solo per host sulla stessa rete locale
 .\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
 
+# Tiene puliti i log: cancella all'avvio i file piu' vecchi di 30 giorni (salvato come impostazione)
+.\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
+
 # Interfaccia in italiano (default: inglese)
 .\Sping.ps1 -ListName Core -Language it
 
@@ -119,6 +122,7 @@ Durante il monitoraggio: premi `A` in qualsiasi momento per attivare/disattivare
 | `-SoundFile` | WAV riprodotto al ripristino di un host |
 | `-Log` / `-LogFile` | Abilita il logging (default o percorso custom) |
 | `-LogFormat` | `Csv` (default) o `Json`: quest'ultimo scrive un oggetto JSON compatto per riga (JSON Lines/NDJSON), adatto all'ingestione da parte di strumenti SIEM/monitoring, con più campi del CSV (protocollo, jitter, giorni alla scadenza del certificato) |
+| `-LogRetentionDays` | Se impostato, cancella all'avvio (non durante la sessione) i file più vecchi di N giorni da tutte le sottocartelle di `SpingData` che accumulano file nel tempo (log, trace, pathtraces, macchanges). Disattivato di default: nessuna cancellazione automatica se non lo richiedi esplicitamente |
 | `-SaveAsDefault` | Salva i parametri di questa esecuzione come nuovi default |
 | `-ShowSettings` / `-ShowLists` | Mostra impostazioni/liste salvate ed esce |
 | `-SaveList` / `-RemoveList` | Salva o elimina una lista host sotto `-ListName` |
