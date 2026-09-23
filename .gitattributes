@@ -1,0 +1,15 @@
+# Normalizza tutti i file di testo a LF nel repository, salvo le eccezioni esplicite sotto.
+* text=auto eol=lf
+
+# Gli script PowerShell mantengono CRLF: convenzione nativa Windows, evita comportamenti diversi
+# con versioni piu' vecchie di PowerShell (5.1) in presenza di soli LF.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+
+# File binari: i fine riga non vanno mai toccati.
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
