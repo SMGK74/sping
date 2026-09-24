@@ -4,6 +4,12 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.19.0]
+
+### Modificato
+- La riga "Sping vX.Y.Z" è ora la primissima stampata, con "Avvisi: ON/OFF" subito sotto (era il contrario).
+- Aggiunta una riga dedicata "Log: ON/OFF" subito sotto Avvisi, che si aggiorna immediatamente premendo `L` - prima lo stato del log era visibile solo nel titolo della finestra.
+
 ## [2.18.1]
 
 ### Aggiunto

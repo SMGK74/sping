@@ -4,6 +4,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.19.0]
+
+### Changed
+- The "Sping vX.Y.Z" line is now printed first, with "Avvisi: ON/OFF" right below it (previously the other way around).
+- Added a dedicated "Log: ON/OFF" line right below Avvisi, updated immediately when pressing `L` - previously log status was only visible in the window title.
+
 ## [2.18.1]
 
 ### Added

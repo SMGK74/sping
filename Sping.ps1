@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.18.1 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.19.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -275,7 +275,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.18.1'
+$script:ScriptVersion = '2.19.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -1419,8 +1419,11 @@ function Format-DashboardRow {
     if ($Text.Length -ge $consoleWidth) { $Text.Substring(0, $consoleWidth) } else { $Text.PadRight($consoleWidth) }
 }
 
-# Riga di stato avvisi: sempre la primissima riga stampata (riga 0), colorata, per dare un feedback immediato
-# quando si preme A. Il titolo della finestra (aggiornato anch'esso al toggle) non supporta testo colorato.
+Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
+
+# Riga di stato avvisi (riga 1, sotto la versione) e riga di stato log (riga 2): sempre le primissime righe
+# stampate, colorate, per dare un feedback immediato quando si preme A o L. Il titolo della finestra
+# (aggiornato anch'esso al toggle) non supporta testo colorato.
 $script:alertsEnabled = -not [bool]$DisableAlerts
 $script:displayFilter = $DisplayFilter
 $script:lastCompactHostNames = @()
@@ -1428,13 +1431,18 @@ $script:lastCompactRedrawTime = $null
 $initialAlertText = if ($script:alertsEnabled) { $S.AlertsOn } else { $S.AlertsOff }
 $initialAlertColor = if ($script:alertsEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
 Write-Host (Format-DashboardRow $initialAlertText) -ForegroundColor $initialAlertColor
-$script:alertsRow = 0
+$script:alertsRow = 1
+
+$initialLogText = if ($script:loggingEnabled) { $S.LogOn } else { $S.LogOff }
+$initialLogColor = if ($script:loggingEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
+Write-Host (Format-DashboardRow $initialLogText) -ForegroundColor $initialLogColor
+$script:logStatusRow = 2
 
 $script:traceNoticeRow = $null
 $script:pathChangeNoticeRow = $null
 $script:pathTraceProgressRow = $null
 $script:macChangeNoticeRow = $null
-$nextNoticeRow = 1
+$nextNoticeRow = 3
 if ($TraceOnFailure -and -not $Summary) {
     Write-Host (Format-DashboardRow '')
     $script:traceNoticeRow = $nextNoticeRow
@@ -1455,8 +1463,6 @@ if ($MonitorMacAddress -and -not $Summary) {
 }
 
 if (-not $Summary) {
-    Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
-
     $neededWidth = $hostColWidth + $(if ($showCertColumn) { 97 } else { 88 }) + $(if ($showMacColumns) { ($macColWidth * $MacHistoryDepth) + 2 } else { 0 })
     if ($consoleWidth -lt $neededWidth) {
         $warnText = $S.WidthWarning -f $neededWidth
@@ -2000,6 +2006,9 @@ try {
                             $script:logWriter = $null
                         }
                     }
+                    $logStatusText = if ($script:loggingEnabled) { $script:S.LogOn } else { $script:S.LogOff }
+                    $logStatusColor = if ($script:loggingEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
+                    Write-DashboardLine -Row $script:logStatusRow -Text $logStatusText -Color $logStatusColor
                     Update-SpingWindowTitle
                 } elseif ($key.Key -eq [System.ConsoleKey]::H) {
                     $script:helpVisible = -not $script:helpVisible
