@@ -4,6 +4,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.22.0]
+
+### Removed
+- `-SummaryColumns` parameter: with automatic column detection introduced in 2.21.0, a manual value no longer made sense and only remained as a source of confusion (it was the exact cause of auto mode not engaging for anyone with a previously saved value). **Breaking change**: anyone using it in scripts or saved commands needs to drop it, the `-Summary` grid is now always automatic.
+
 ## [2.21.0]
 
 ### Added

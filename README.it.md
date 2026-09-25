@@ -121,8 +121,7 @@ Durante il monitoraggio, premi `H` in qualsiasi momento per mostrare/nascondere 
 | `-TimeoutMillis` | Timeout in ms per ogni risposta |
 | `-IntervalMillis` | Pausa in ms tra un ciclo e l'altro. Con `-Protocol Http`/`Https`/`Tcp` viene imposto un minimo di 3000 ms, anche se richiedi un valore più basso, per non rischiare di sembrare un flood/DDoS verso gli host monitorati |
 | `-ResumeThreshold` | Fallimenti consecutivi da cui la riga passa da arancione a rosso, e sotto cui scatta l'allarme sonoro al ripristino |
-| `-Summary` | Griglia compatta invece di una riga per host, vedi `-SummaryColumns` |
-| `-SummaryColumns` | Solo con `-Summary`: numero di host per riga nella griglia compatta. Se non lo specifichi (né qui né come default salvato), viene calcolato automaticamente dalla larghezza della finestra, aggiornandosi anche durante l'esecuzione al ridimensionamento |
+| `-Summary` | Griglia compatta invece di una riga per host. Il numero di colonne per riga è sempre calcolato automaticamente dalla larghezza della finestra attuale, aggiornandosi anche durante l'esecuzione al ridimensionamento |
 | `-SoundFile` | WAV riprodotto al ripristino di un host |
 | `-Log` / `-LogFile` | Abilita il logging (default o percorso custom). Attivabile/disattivabile anche al volo durante il monitoraggio con il tasto `L`, senza riavviare la sessione |
 | `-LogFormat` | `Csv` (default) o `Json`: quest'ultimo scrive un oggetto JSON compatto per riga (JSON Lines/NDJSON), adatto all'ingestione da parte di strumenti SIEM/monitoring, con più campi del CSV (protocollo, jitter, giorni alla scadenza del certificato) |

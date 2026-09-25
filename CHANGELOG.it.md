@@ -4,6 +4,11 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.22.0]
+
+### Rimosso
+- Parametro `-SummaryColumns`: con il calcolo automatico delle colonne introdotto in 2.21.0, un valore manuale non aveva più senso e restava solo come fonte di confusione (era la causa esatta per cui la modalità automatica non si attivava per chi aveva un valore salvato da prima). **Cambio con rottura di compatibilità**: chi lo usava in script o comandi salvati deve toglierlo, la griglia `-Summary` ora è sempre automatica.
+
 ## [2.21.0]
 
 ### Aggiunto

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Sping v2.21.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.22.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -138,10 +138,8 @@
     Number of consecutive failures after which a recovery triggers the sound/voice alert.
 
 .PARAMETER Summary
-    Show a compact grid instead of one full row per host. Columns per row: see -SummaryColumns.
-
-.PARAMETER SummaryColumns
-    Only relevant with -Summary. Number of hosts per row in the compact grid. Default: 4.
+    Show a compact grid instead of one full row per host. Columns per row are always computed
+    automatically from the current window width, adapting live if the window is resized.
 
 .PARAMETER SoundFile
     WAV file to play when a host recovers.
@@ -267,7 +265,6 @@ param(
     [int]$IntervalMillis,
     [int]$ResumeThreshold,
     [switch]$Summary,
-    [int]$SummaryColumns,
     [string]$SoundFile,
     [switch]$Log,
     [string]$LogFile,
@@ -289,7 +286,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.21.0'
+$script:ScriptVersion = '2.22.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -333,7 +330,6 @@ function Get-SpingConfig {
         TimeoutMillis   = 1000
         IntervalMillis  = 1000
         Summary         = $false
-        SummaryColumns  = 0
         LogFormat       = 'Csv'
         LogRetentionDays = 0
         DisplayFilter   = 'All'
@@ -777,12 +773,6 @@ if (-not $PSBoundParameters.ContainsKey('TimeoutMillis'))    { $TimeoutMillis  =
 if (-not $PSBoundParameters.ContainsKey('IntervalMillis'))   { $IntervalMillis = $cfg.IntervalMillis }
 if (-not $PSBoundParameters.ContainsKey('SoundFile'))        { $SoundFile      = $cfg.SoundFile }
 if (-not $PSBoundParameters.ContainsKey('Summary'))          { $Summary        = [bool]$cfg.Summary }
-$script:summaryColumnsAuto = (-not $PSBoundParameters.ContainsKey('SummaryColumns')) -and (-not $cfg.SummaryColumns)
-if ($script:summaryColumnsAuto) {
-    $SummaryColumns = 0   # segnaposto: il numero vero si calcola dalla larghezza finestra quando serve
-} elseif (-not $PSBoundParameters.ContainsKey('SummaryColumns') -or $SummaryColumns -le 0) {
-    $SummaryColumns = if ($cfg.SummaryColumns) { $cfg.SummaryColumns } else { 4 }
-}
 if (-not $PSBoundParameters.ContainsKey('LogFormat')) { $LogFormat = if ($cfg.LogFormat) { $cfg.LogFormat } else { 'Csv' } }
 if (-not $PSBoundParameters.ContainsKey('LogRetentionDays')) { $LogRetentionDays = if ($cfg.LogRetentionDays) { $cfg.LogRetentionDays } else { 0 } }
 if (-not $PSBoundParameters.ContainsKey('DisplayFilter')) { $DisplayFilter = if ($cfg.DisplayFilter) { $cfg.DisplayFilter } else { 'All' } }
@@ -816,7 +806,6 @@ if ($SaveAsDefault) {
     $cfg.IntervalMillis  = $IntervalMillis
     $cfg.SoundFile       = $SoundFile
     $cfg.Summary         = [bool]$Summary
-    $cfg.SummaryColumns  = $SummaryColumns
     $cfg.LogFormat       = $LogFormat
     $cfg.LogRetentionDays = $LogRetentionDays
     $cfg.DisplayFilter   = $DisplayFilter
@@ -1662,10 +1651,10 @@ if (-not $Summary) {
         Write-Host ($S.ManyHostsWarning -f $hostStates.Count) -ForegroundColor DarkYellow
     }
 } else {
-    # Griglia compatta: -SummaryColumns host per riga (default 4, o calcolato dalla larghezza finestra se
-    # non specificato - vedi $script:summaryColumnsAuto), larghezza cella basata sul nome host piu' lungo.
+    # Griglia compatta: numero di host per riga calcolato automaticamente dalla larghezza della finestra,
+    # larghezza cella basata sul nome host piu' lungo.
     $script:summaryCellWidth = $hostColWidth + 5
-    $script:currentSummaryColumns = if ($script:summaryColumnsAuto) { Get-SpingAutoSummaryColumns } else { $SummaryColumns }
+    $script:currentSummaryColumns = Get-SpingAutoSummaryColumns
     $hostsPerRow = $script:currentSummaryColumns
     $script:gridRows = New-Object System.Collections.Generic.List[object]
     for ($i = 0; $i -lt $hostStates.Count; $i += $hostsPerRow) {
@@ -2123,18 +2112,16 @@ try {
         }
 
         if ($Summary) {
-            if ($script:summaryColumnsAuto) {
-                # Controllo economico (due interi) ad ogni ciclo; ricostruisce la griglia solo se la larghezza
-                # e' davvero cambiata E sono passati almeno 500ms dall'ultima ricostruzione, cosi' trascinare
-                # il bordo della finestra non scatena una raffica di ridisegni in rapida sequenza.
-                $currentWinWidth = try { $Host.UI.RawUI.WindowSize.Width } catch { $script:lastSummaryWinWidth }
-                if ($currentWinWidth -ne $script:lastSummaryWinWidth) {
-                    $debounceElapsed = (-not $script:lastSummaryResizeTime) -or (((Get-Date) - $script:lastSummaryResizeTime).TotalMilliseconds -ge 500)
-                    if ($debounceElapsed) {
-                        Update-SpingSummaryGrid
-                        $script:lastSummaryWinWidth = $currentWinWidth
-                        $script:lastSummaryResizeTime = Get-Date
-                    }
+            # Controllo economico (due interi) ad ogni ciclo; ricostruisce la griglia solo se la larghezza
+            # e' davvero cambiata E sono passati almeno 500ms dall'ultima ricostruzione, cosi' trascinare
+            # il bordo della finestra non scatena una raffica di ridisegni in rapida sequenza.
+            $currentWinWidth = try { $Host.UI.RawUI.WindowSize.Width } catch { $script:lastSummaryWinWidth }
+            if ($currentWinWidth -ne $script:lastSummaryWinWidth) {
+                $debounceElapsed = (-not $script:lastSummaryResizeTime) -or (((Get-Date) - $script:lastSummaryResizeTime).TotalMilliseconds -ge 500)
+                if ($debounceElapsed) {
+                    Update-SpingSummaryGrid
+                    $script:lastSummaryWinWidth = $currentWinWidth
+                    $script:lastSummaryResizeTime = Get-Date
                 }
             }
             foreach ($gridRow in $script:gridRows) { Write-SpingSummaryGridRow -GridRow $gridRow }

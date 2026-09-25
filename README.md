@@ -121,8 +121,7 @@ While monitoring, press `H` at any time to show/hide a panel listing every avail
 | `-TimeoutMillis` | Timeout in ms to wait for each reply |
 | `-IntervalMillis` | Pause in ms between cycles. With `-Protocol Http`/`Https`/`Tcp` a minimum of 3000 ms is enforced, even if you request a lower value, to avoid resembling a flood/DDoS against the monitored hosts |
 | `-ResumeThreshold` | Consecutive failures after which the row switches from orange to red, and below which the sound alert fires on recovery |
-| `-Summary` | Compact grid instead of one row per host, see `-SummaryColumns` |
-| `-SummaryColumns` | Only with `-Summary`: hosts per row in the compact grid. If not specified (neither here nor as a saved default), it's auto-computed from the window width, also adapting live during the session on resize |
+| `-Summary` | Compact grid instead of one row per host. Columns per row are always auto-computed from the current window width, also adapting live during the session on resize |
 | `-SoundFile` | WAV file played when a host recovers |
 | `-Log` / `-LogFile` | Enable logging (default or custom path). Can also be toggled live during monitoring with the `L` key, without restarting the session |
 | `-LogFormat` | `Csv` (default) or `Json`: the latter writes one compact JSON object per line (JSON Lines/NDJSON), suitable for ingestion by SIEM/monitoring tools, with more fields than the CSV (protocol, jitter, certificate days-to-expiry) |
