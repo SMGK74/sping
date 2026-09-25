@@ -4,6 +4,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.21.0]
+
+### Added
+- `-SaveAsDefault` used alone, with no host, now saves settings and exits cleanly instead of giving the "no hosts to ping" error.
+- `T` key: toggles `-TraceOnFailure` live during monitoring (disabled above 10 hosts, to avoid a burst of simultaneous tracert launches). Turning it on while a host is already down immediately attempts a trace for it (doesn't wait for a fresh up-to-down transition). Multiple hosts starting a trace in the same pass show up on the same line, comma-separated, instead of overwriting each other. The trace now only fires once a host reaches `ResumeThreshold` (confirmed down), not on the very first packet loss.
+- On-screen warning if the log folder exceeds 10 MB (lightweight check every 20 cycles, once per session).
+- Richer command-line help with `.NOTES` and `.LINK` sections (requirements, where to find changelog/readme, repository). `-Help` now shows the standard PowerShell concise view; for everything (notes included) use `Get-Help -Full` separately.
+- Range shorthand: explicit error if the trailing number exceeds 255, instead of undefined behavior.
+- STATUS column moved to the **end** of the row (after TTLEXP, CERT, MAC columns): free-form text with no fixed width, no longer pushes other columns out of alignment when long.
+- `-Summary` now auto-computes the column count from window width when `-SummaryColumns` isn't specified (neither on the command line nor as a saved default), also adapting **live during the session** on resize (polling with debounce). **Known limitation**: with very rapid, continuous window-border dragging, a residual visual fragment can occasionally remain; normal use (startup, a single resize) works correctly.
+- On first run, offers to add the script's folder to the Windows user PATH (requires explicit Y/N confirmation), so the command can be run from any folder. Requires a new PowerShell window to take effect.
+
+### Fixed
+- Pre-existing bug in `-TraceOnFailure`: the active-trace-process list was converted into a fixed-size array on every concurrent-trace-limit check, silently breaking every subsequent attempt to start a new one.
+- The width used to pad/truncate rows (`$consoleWidth`) stayed fixed at the startup value and never updated on window resize.
+
+## [2.20.0]
+
+### Changed
+- Four parameters renamed for consistency with their "relatives" (subject noun first, not the action): `-MonitorMacAddress` → `-MacMonitor` (like `-MacHistoryDepth`), `-TracePathChanges` → `-PathTrace` (like `-PathTraceIntervalMinutes`/`-PathTraceMaxHops`), `-MaxConcurrentTraces` → `-TraceMaxConcurrent` (like `-TraceOnFailure`/`-TraceCooldownMinutes`), `-IgnoreCertificateErrors` → `-CertIgnoreErrors` (like `-CertWarningDays`). **Breaking change**: the previous names are no longer valid, no alias kept - update any scripts or scheduled tasks that use them.
+
 ## [2.19.0]
 
 ### Changed

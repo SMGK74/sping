@@ -4,6 +4,27 @@
 
 Tutte le modifiche rilevanti al progetto sono documentate in questo file.
 
+## [2.21.0]
+
+### Aggiunto
+- `-SaveAsDefault` usato da solo, senza host, ora salva le impostazioni ed esce pulito invece di dare l'errore "nessun host da pingare".
+- Tasto `T`: attiva/disattiva `-TraceOnFailure` a caldo durante il monitoraggio (bloccato oltre 10 host, per evitare una raffica di tracert tutti insieme). Attivandolo mentre un host è già giù, tenta subito una traccia per lui (non aspetta un nuovo passaggio su→giù). Più host che avviano la traccia nello stesso giro compaiono sulla stessa riga, separati da virgola, invece di sovrascriversi a vicenda. La traccia parte solo quando l'host raggiunge `ResumeThreshold` (confermato giù), non al primo pacchetto perso.
+- Avviso a schermo se la cartella dei log supera 10 MB (controllo leggero ogni 20 cicli, una volta a sessione).
+- Help da riga di comando arricchito con sezioni `.NOTES` e `.LINK` (requisiti, dove trovare changelog/readme, repository). `-Help` mostra ora la vista sintetica standard di PowerShell; per tutto (incluse le note) si usa `Get-Help -Full` a parte.
+- Scorciatoia range: errore esplicito se l'ultimo numero supera 255, invece di un comportamento indefinito.
+- Colonna STATO spostata in **fondo** alla riga (dopo TTLEXP, CERT, colonne MAC): testo libero senza larghezza fissa, non spinge più le altre colonne fuori allineamento se lungo.
+- `-Summary` ora calcola automaticamente il numero di colonne dalla larghezza della finestra quando non specifichi `-SummaryColumns` (né a riga di comando né come default salvato), aggiornandosi anche **durante l'esecuzione** al ridimensionamento (controllo per polling con debounce). **Limite noto**: con trascinamenti molto rapidi e continui del bordo finestra può restare qualche frammento visivo residuo in casi rari; l'uso normale (avvio, ridimensionamento singolo) funziona correttamente.
+- Al primo avvio, propone di aggiungere la cartella dello script al PATH utente di Windows (richiede conferma esplicita S/N), così il comando è richiamabile da qualsiasi cartella. Richiede una nuova finestra PowerShell per avere effetto.
+
+### Corretto
+- Bug preesistente in `-TraceOnFailure`: la lista dei processi di traccia attivi veniva convertita in un array a dimensione fissa ad ogni controllo del limite di tracce simultanee, rompendo silenziosamente ogni tentativo successivo di avviarne di nuove.
+- La larghezza usata per riempire/troncare le righe (`$consoleWidth`) restava fissa al valore dell'avvio e non si aggiornava mai al ridimensionamento della finestra.
+
+## [2.20.0]
+
+### Modificato
+- Quattro parametri rinominati per coerenza con i loro "parenti" (nome del soggetto prima, non l'azione): `-MonitorMacAddress` → `-MacMonitor` (come `-MacHistoryDepth`), `-TracePathChanges` → `-PathTrace` (come `-PathTraceIntervalMinutes`/`-PathTraceMaxHops`), `-MaxConcurrentTraces` → `-TraceMaxConcurrent` (come `-TraceOnFailure`/`-TraceCooldownMinutes`), `-IgnoreCertificateErrors` → `-CertIgnoreErrors` (come `-CertWarningDays`). **Cambio con rottura di compatibilità**: i nomi precedenti non sono più validi, nessun alias mantenuto - aggiorna eventuali script o task pianificati che li usano.
+
 ## [2.19.0]
 
 ### Modificato

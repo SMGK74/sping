@@ -1,7 +1,6 @@
-#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Sping v2.19.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.21.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -32,19 +31,19 @@
     unreachable or TTL expired), runs "tracert -d -h 20 -w 1000" for that host as an independent
     background process (does not block the dashboard) and saves its output to a timestamped file
     under SpingData\traces. Fires once per down episode, not on every failed cycle - subject to
-    -TraceCooldownMinutes and -MaxConcurrentTraces below. A brief on-screen notice (row 1) shows the
+    -TraceCooldownMinutes and -TraceMaxConcurrent below. A brief on-screen notice (row 1) shows the
     latest trace started or skipped.
 
 .PARAMETER TraceCooldownMinutes
     Only relevant with -TraceOnFailure. Minimum minutes between two traceroutes for the SAME host,
     to avoid re-tracing a flapping host on every down episode. Default: 10.
 
-.PARAMETER MaxConcurrentTraces
+.PARAMETER TraceMaxConcurrent
     Only relevant with -TraceOnFailure. Cap on how many tracert processes can be running at once
     across ALL hosts, to avoid exhausting system resources when many hosts fail together (e.g. a
     broad CIDR range going down at once). Default: 5. Extra traces are skipped, not queued.
 
-.PARAMETER TracePathChanges
+.PARAMETER PathTrace
     Periodically re-traces the route to every host (independent of the ping cycle, and independent
     of -TraceOnFailure) using a native, non-blocking hop-by-hop probe spread across several cycles
     (one hop per cycle, never pausing the dashboard), and flags it if the route differs from the
@@ -53,11 +52,11 @@
     timestamped file under SpingData\pathtraces.
 
 .PARAMETER PathTraceIntervalMinutes
-    Only relevant with -TracePathChanges. Minutes between the end of one completed trace and the
+    Only relevant with -PathTrace. Minutes between the end of one completed trace and the
     start of the next, per host. Default: 15.
 
 .PARAMETER PathTraceMaxHops
-    Only relevant with -TracePathChanges. Maximum hops to probe before giving up on reaching the
+    Only relevant with -PathTrace. Maximum hops to probe before giving up on reaching the
     destination. Default: 20.
 
 .PARAMETER DisplayFilter
@@ -69,7 +68,7 @@
     monitoring (All -> UpOnly -> DownOnly -> All), which also restores each host's original
     position when returning to All. Not available in -Summary mode.
 
-.PARAMETER MonitorMacAddress
+.PARAMETER MacMonitor
     Reads each host's MAC address from Windows' own neighbor table (Get-NetNeighbor, requires the
     NetTCPIP module - built into Windows 8/Server 2012 and later) every cycle, flagging it if it
     changes from the previous one (possible IP conflict, replaced device, or ARP spoofing). Relies
@@ -82,7 +81,7 @@
     under SpingData\macchanges, regardless of how many history columns are shown.
 
 .PARAMETER MacHistoryDepth
-    Only relevant with -MonitorMacAddress. Number of MAC-history columns shown in the dashboard
+    Only relevant with -MacMonitor. Number of MAC-history columns shown in the dashboard
     (MAC1, MAC2, ...), reserved once at startup - never added mid-session, to avoid recomputing
     the layout while running. Default: 3. Changes beyond this many are still fully logged to
     SpingData\macchanges even though the dashboard only shows the first -MacHistoryDepth ones.
@@ -105,7 +104,7 @@
 .PARAMETER Port
     TCP port to connect to. Required with -Protocol Tcp.
 
-.PARAMETER IgnoreCertificateErrors
+.PARAMETER CertIgnoreErrors
     Only relevant with -Protocol Https. Skip TLS certificate validation (useful for internal hosts
     with self-signed certificates).
 
@@ -206,7 +205,7 @@
     .\Sping.ps1 10.0.0.1 10.0.0.2 -ListName Core -SaveList
 
 .EXAMPLE
-    .\Sping.ps1 www.contoso.local -Protocol Https -IgnoreCertificateErrors
+    .\Sping.ps1 www.contoso.local -Protocol Https -CertIgnoreErrors
 
 .EXAMPLE
     .\Sping.ps1 db-server-01 -Protocol Tcp -Port 1433
@@ -215,14 +214,28 @@
     .\Sping.ps1 -ListName Core -DisplayFilter DownOnly
 
 .EXAMPLE
-    .\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
+    .\Sping.ps1 192.168.1.1 192.168.1.254 -MacMonitor -MacHistoryDepth 4 -Log
 
 .EXAMPLE
     .\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
 
 .EXAMPLE
     .\Sping.ps1 -ShowSettings -Language it
+
+.NOTES
+    Requires Windows PowerShell 5.1 or later (also runs on newer PowerShell). No external modules
+    or dependencies - only built-in .NET classes and Windows APIs (Get-NetNeighbor requires the
+    NetTCPIP module, built into Windows 8/Server 2012 and later, only needed with -MacMonitor).
+    Tested on Windows 10/11 and Windows Server 2016+.
+
+    Run with -ShowSettings to see the current saved defaults and where they're stored, or
+    -ShowLists to see saved host lists. See CHANGELOG.md in the repository for the full version
+    history, and README.md for a fuller usage guide with more examples.
+
+.LINK
+    https://github.com/SMGK74/sping
 #>
+#Requires -Version 5.1
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
@@ -237,15 +250,15 @@ param(
     [int]$MaxRangeHosts,
     [switch]$TraceOnFailure,
     [int]$TraceCooldownMinutes,
-    [int]$MaxConcurrentTraces,
-    [switch]$TracePathChanges,
+    [int]$TraceMaxConcurrent,
+    [switch]$PathTrace,
     [int]$PathTraceIntervalMinutes,
     [int]$PathTraceMaxHops,
     [ValidateSet('All', 'UpOnly', 'DownOnly')]
     [string]$DisplayFilter,
-    [switch]$MonitorMacAddress,
+    [switch]$MacMonitor,
     [int]$MacHistoryDepth,
-    [switch]$IgnoreCertificateErrors,
+    [switch]$CertIgnoreErrors,
     [int]$CertWarningDays,
     [switch]$DisableAlerts,
     [string]$Language,
@@ -269,13 +282,14 @@ param(
     [switch]$Help
 )
 
-# Nessun parametro, oppure -Help esplicito: mostra la guida completa ed esci.
+# Nessun parametro, oppure -Help esplicito: mostra la guida sintetica ed esci (nome, sinossi, sintassi,
+# descrizione, esempi - come da prassi PowerShell). Per tutto, incluse le note, si usa Get-Help -Full a parte.
 if ($Help -or $PSBoundParameters.Count -eq 0) {
-    Get-Help -Full $PSCommandPath
+    Get-Help $PSCommandPath
     return
 }
 
-$script:ScriptVersion = '2.19.0'
+$script:ScriptVersion = '2.21.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -319,7 +333,7 @@ function Get-SpingConfig {
         TimeoutMillis   = 1000
         IntervalMillis  = 1000
         Summary         = $false
-        SummaryColumns  = 4
+        SummaryColumns  = 0
         LogFormat       = 'Csv'
         LogRetentionDays = 0
         DisplayFilter   = 'All'
@@ -329,6 +343,7 @@ function Get-SpingConfig {
         CertWarningDays = 30
         Language        = $detectedLanguage
         AlertsEnabled   = $true
+        PathOfferShown  = $false
     }
     if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
     if (-not (Test-Path $ConfigFile)) {
@@ -433,9 +448,17 @@ $script:BuiltInStrings = @{
         HelpReset             = "  R           Reset accumulated counters (sent, received, lost, jitter)"
         HelpHelp              = "  H           Show/hide this help"
         HelpLog               = "  L           Toggle logging on or off (does not restart the session)"
+        HelpTrace             = "  T           Toggle automatic traceroute-on-failure (only with 10 hosts or fewer)"
         LangFileRefreshed     = "Language file updated to the latest text: {0} (redo any manual customization if you had made one)"
         LogOn                 = "Log: ON"
         LogOff                = "Log: OFF"
+        AutoTraceOn           = "Auto-trace: ON"
+        AutoTraceOff          = "Auto-trace: OFF"
+        TraceToggleTooManyHosts = "Auto-trace can only be toggled live with 10 hosts or fewer ({0} monitored) - use -TraceOnFailure at startup instead"
+        LogSizeWarning        = "Log folder is now {0} MB - consider -LogRetentionDays to clean up old files"
+        PathOfferPrompt       = "Add {0} to your PATH so you can run 'sping' from any folder? (Y/N)"
+        PathOfferDone         = "Added to PATH. Open a new PowerShell window for it to take effect."
+        PathOfferFailed       = "Could not update PATH: {0}"
         PathTraceNextIn       = "Next path trace: {0} in {1} min"
         FilterLabel           = "Filter"
         FilterAll             = "All"
@@ -503,9 +526,17 @@ $script:BuiltInStrings = @{
         HelpReset             = "  R           Azzera i contatori accumulati (inviati, ricevuti, persi, jitter)"
         HelpHelp              = "  H           Mostra/nascondi questa guida"
         HelpLog               = "  L           Attiva/disattiva la scrittura del log (senza riavviare la sessione)"
+        HelpTrace             = "  T           Attiva/disattiva la traccia automatica sui fallimenti (solo con 10 host o meno)"
         LangFileRefreshed     = "File lingua aggiornato all'ultimo testo: {0} (rifai eventuali personalizzazioni manuali se ne avevi fatte)"
         LogOn                 = "Log: ON"
         LogOff                = "Log: OFF"
+        AutoTraceOn           = "Traccia automatica: ON"
+        AutoTraceOff          = "Traccia automatica: OFF"
+        TraceToggleTooManyHosts = "La traccia automatica si puo' attivare al volo solo con 10 host o meno ({0} monitorati) - usa -TraceOnFailure all'avvio"
+        LogSizeWarning        = "La cartella dei log ha raggiunto {0} MB - valuta -LogRetentionDays per ripulire i file vecchi"
+        PathOfferPrompt       = "Aggiungere {0} al PATH cosi' puoi lanciare 'sping' da qualsiasi cartella? (S/N)"
+        PathOfferDone         = "Aggiunto al PATH. Apri una nuova finestra PowerShell perche' abbia effetto."
+        PathOfferFailed       = "Non sono riuscito ad aggiornare il PATH: {0}"
         PathTraceProgress     = "Tracciamento {0}: hop {1}/{2} -> {3}"
         PathTraceNextIn       = "Prossima traccia percorso: {0} tra {1} min"
         FilterLabel           = "Filtro"
@@ -711,6 +742,9 @@ function Expand-SpingTarget {
         $startIp = $Matches[1]
         $endPart = $Matches[2]
         $endIp = if ($endPart -match '^\d{1,3}$') {
+            if ([int]$endPart -gt 255) {
+                throw "L'ultimo numero del range '$Target' supera 255 (indirizzo IP non valido)."
+            }
             $octets = $startIp.Split('.')
             "$($octets[0]).$($octets[1]).$($octets[2]).$endPart"
         } else {
@@ -743,7 +777,12 @@ if (-not $PSBoundParameters.ContainsKey('TimeoutMillis'))    { $TimeoutMillis  =
 if (-not $PSBoundParameters.ContainsKey('IntervalMillis'))   { $IntervalMillis = $cfg.IntervalMillis }
 if (-not $PSBoundParameters.ContainsKey('SoundFile'))        { $SoundFile      = $cfg.SoundFile }
 if (-not $PSBoundParameters.ContainsKey('Summary'))          { $Summary        = [bool]$cfg.Summary }
-if (-not $PSBoundParameters.ContainsKey('SummaryColumns') -or $SummaryColumns -le 0) { $SummaryColumns = if ($cfg.SummaryColumns) { $cfg.SummaryColumns } else { 4 } }
+$script:summaryColumnsAuto = (-not $PSBoundParameters.ContainsKey('SummaryColumns')) -and (-not $cfg.SummaryColumns)
+if ($script:summaryColumnsAuto) {
+    $SummaryColumns = 0   # segnaposto: il numero vero si calcola dalla larghezza finestra quando serve
+} elseif (-not $PSBoundParameters.ContainsKey('SummaryColumns') -or $SummaryColumns -le 0) {
+    $SummaryColumns = if ($cfg.SummaryColumns) { $cfg.SummaryColumns } else { 4 }
+}
 if (-not $PSBoundParameters.ContainsKey('LogFormat')) { $LogFormat = if ($cfg.LogFormat) { $cfg.LogFormat } else { 'Csv' } }
 if (-not $PSBoundParameters.ContainsKey('LogRetentionDays')) { $LogRetentionDays = if ($cfg.LogRetentionDays) { $cfg.LogRetentionDays } else { 0 } }
 if (-not $PSBoundParameters.ContainsKey('DisplayFilter')) { $DisplayFilter = if ($cfg.DisplayFilter) { $cfg.DisplayFilter } else { 'All' } }
@@ -788,11 +827,16 @@ if ($SaveAsDefault) {
     $cfg.AlertsEnabled   = -not [bool]$DisableAlerts
     Save-SpingConfig -Config $cfg
     Write-Host $S.SettingsSaved -ForegroundColor Green
+    if (-not $ComputerName -and -not $ListName) {
+        # -SaveAsDefault usato da solo, senza host: e' un'azione di utilita' legittima (come -ShowSettings),
+        # non un tentativo di monitoraggio mancato - salva ed esce pulito invece di dare l'errore "nessun host".
+        return
+    }
 }
 
 if (-not $PSBoundParameters.ContainsKey('MaxRangeHosts') -or $MaxRangeHosts -le 0) { $MaxRangeHosts = 1024 }
 if (-not $PSBoundParameters.ContainsKey('TraceCooldownMinutes') -or $TraceCooldownMinutes -le 0) { $TraceCooldownMinutes = 10 }
-if (-not $PSBoundParameters.ContainsKey('MaxConcurrentTraces') -or $MaxConcurrentTraces -le 0) { $MaxConcurrentTraces = 5 }
+if (-not $PSBoundParameters.ContainsKey('TraceMaxConcurrent') -or $TraceMaxConcurrent -le 0) { $TraceMaxConcurrent = 5 }
 if (-not $PSBoundParameters.ContainsKey('PathTraceIntervalMinutes') -or $PathTraceIntervalMinutes -le 0) { $PathTraceIntervalMinutes = 15 }
 if (-not $PSBoundParameters.ContainsKey('PathTraceMaxHops') -or $PathTraceMaxHops -le 0) { $PathTraceMaxHops = 20 }
 if (-not $PSBoundParameters.ContainsKey('MacHistoryDepth') -or $MacHistoryDepth -le 0) { $MacHistoryDepth = 3 }
@@ -849,7 +893,7 @@ $script:HttpClient = $null
 if ($Protocol -ne 'Icmp') {
     Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
     $handler = New-Object System.Net.Http.HttpClientHandler
-    if ($IgnoreCertificateErrors) {
+    if ($CertIgnoreErrors) {
         # PROVATO con un test diagnostico dedicato (vedi CHANGELOG 2.5.9): un callback di validazione basato
         # su scriptblock PowerShell, anche banale come "{ $true }", fallisce se invocato da .NET su un thread
         # privo di Runspace ("There is no Runspace available to run scripts in this thread") - esattamente
@@ -1153,7 +1197,7 @@ function Get-CertificateExpiry {
             }
         } catch {
             # Puo' fallire per catena non attendibile (es. certificato self-signed): qui non possiamo
-            # installare un override (vedi sopra), quindi -IgnoreCertificateErrors non si applica a
+            # installare un override (vedi sopra), quindi -CertIgnoreErrors non si applica a
             # questa sonda. Il certificato, se il peer l'ha gia' inviato, resta pero' spesso leggibile
             # comunque: proviamo a leggerlo lo stesso invece di arrenderci subito.
             $inner = $_.Exception.InnerException
@@ -1200,9 +1244,54 @@ function Start-SpingTraceroute {
 }
 
 function Get-SpingActiveTraceCount {
-    # Rimuove dalla lista i processi ormai terminati, poi restituisce quanti restano attivi.
-    $script:ActiveTraceProcesses = @($script:ActiveTraceProcesses | Where-Object { -not $_.HasExited })
+    # Rimuove dalla lista i processi ormai terminati, poi restituisce quanti restano attivi. Ricostruita
+    # come vera List (non con "@(...)", che la converte in un array a dimensione fissa e rompe .Add()
+    # per sempre da quel momento in poi - bug preesistente, trovato con un diagnostico mirato).
+    $stillRunning = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
+    foreach ($p in $script:ActiveTraceProcesses) {
+        if (-not $p.HasExited) { $stillRunning.Add($p) }
+    }
+    $script:ActiveTraceProcesses = $stillRunning
     return $script:ActiveTraceProcesses.Count
+}
+
+function Invoke-SpingAutoTrace {
+    param($State)
+    # Estratta cosi' da poterla richiamare sia dal normale innesco a ogni ciclo (primo fallimento) sia dal
+    # tasto T quando si attiva la traccia automatica mentre un host e' gia' giu' (altrimenti quell'host non
+    # avrebbe mai una traccia, dato che l'innesco normale scatta solo sulla transizione su->giu').
+    $cooldownOk = (-not $State.LastTraceTime) -or (((Get-Date) - $State.LastTraceTime).TotalMinutes -ge $TraceCooldownMinutes)
+    if (-not $cooldownOk) {
+        $noticeText = $script:S.TraceSkippedCooldown -f $State.Host
+        if ($noticeText -and $null -ne $script:traceNoticeRow) {
+            Write-DashboardLine -Row $script:traceNoticeRow -Text $noticeText -Color ([System.ConsoleColor]::DarkGray)
+        }
+    } elseif ((Get-SpingActiveTraceCount) -ge $TraceMaxConcurrent) {
+        $noticeText = $script:S.TraceSkippedCap -f $State.Host
+        if ($noticeText -and $null -ne $script:traceNoticeRow) {
+            Write-DashboardLine -Row $script:traceNoticeRow -Text $noticeText -Color ([System.ConsoleColor]::DarkGray)
+        }
+    } else {
+        $traceFile = Start-SpingTraceroute -TargetHost $State.Host
+        if ($traceFile) {
+            $State.LastTraceTime = Get-Date
+            $script:TraceNotices += "$($State.Host) -> $traceFile"
+            # Non scrive subito sulla riga: si accumula, cosi' se piu' host partono nello stesso ciclo (o
+            # nello stesso "recupero" al tasto T) compaiono tutti insieme invece che l'uno sopra l'altro.
+            $script:pendingTraceStarts.Add($State.Host)
+        }
+    }
+}
+
+function Publish-SpingPendingTraceStarts {
+    # Da chiamare una volta sola dopo un intero "giro" (un ciclo, o il recupero al tasto T), non dentro
+    # Invoke-SpingAutoTrace stesso - cosi' piu' host avviati insieme compaiono sulla stessa riga invece
+    # di sovrascriversi a vicenda uno dopo l'altro.
+    if ($script:pendingTraceStarts.Count -gt 0 -and $null -ne $script:traceNoticeRow) {
+        $joined = $script:pendingTraceStarts -join ', '
+        Write-DashboardLine -Row $script:traceNoticeRow -Text ($script:S.TraceStarted -f $joined) -Color ([System.ConsoleColor]::DarkGray)
+    }
+    $script:pendingTraceStarts = New-Object System.Collections.Generic.List[string]
 }
 
 function Start-SpingPathTraceStep {
@@ -1325,6 +1414,34 @@ if ($LogRetentionDays -gt 0) {
 
 #endregion
 
+#region First-run PATH offer ----------------------------------------------------
+
+if (-not $cfg.PathOfferShown -and $PSCommandPath) {
+    $cfg.PathOfferShown = $true
+    Save-SpingConfig -Config $cfg
+    $scriptDir = Split-Path -Parent $PSCommandPath
+    try {
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $alreadyInPath = $userPath -and (($userPath -split ';') -contains $scriptDir)
+    } catch {
+        $alreadyInPath = $true   # in caso di dubbio non proporre nulla, piuttosto che rischiare un errore
+    }
+    if (-not $alreadyInPath) {
+        $response = Read-Host ($S.PathOfferPrompt -f $scriptDir)
+        if ($response -match '^[SsYy]') {
+            try {
+                $newPath = if ($userPath) { "$userPath;$scriptDir" } else { $scriptDir }
+                [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+                Write-Host $S.PathOfferDone -ForegroundColor Green
+            } catch {
+                Write-Warning ($S.PathOfferFailed -f $_.Exception.Message)
+            }
+        }
+    }
+}
+
+#endregion
+
 #region State & dashboard setup -------------------------------------------------
 
 $hostStates = foreach ($h in $targets) {
@@ -1368,7 +1485,7 @@ $hostStates = foreach ($h in $targets) {
     }
 }
 
-if ($MonitorMacAddress) {
+if ($MacMonitor) {
     foreach ($state in $hostStates) { $state.MacHistory = New-Object System.Collections.Generic.List[string] }
 }
 
@@ -1387,7 +1504,7 @@ if ($Protocol -eq 'Https') {
         # (handshake TCP+TLS da zero, a differenza del monitoraggio che riusa connessioni gia' aperte), gira
         # una sola volta all'avvio, quindi puo' permettersi qualche secondo in piu' senza impattare il ciclo.
         $certProbeTimeoutMs = [Math]::Max($TimeoutMillis * 5, 8000)
-        $state.CertExpiry = Get-CertificateExpiry -HostName $state.Host -TimeoutMs $certProbeTimeoutMs -IgnoreCertErrors $IgnoreCertificateErrors
+        $state.CertExpiry = Get-CertificateExpiry -HostName $state.Host -TimeoutMs $certProbeTimeoutMs -IgnoreCertErrors $CertIgnoreErrors
     }
 }
 
@@ -1400,23 +1517,33 @@ Clear-Host
 
 $consoleWidth = [console]::WindowWidth - 1
 if ($consoleWidth -lt 60) { $consoleWidth = 60 }
+$script:maxEverConsoleWidth = $consoleWidth
 
 # Larghezza della colonna HOST calcolata sul nome piu' lungo tra quelli monitorati (min 12, con un margine di 2),
 # cosi' host con FQDN lunghi non sfasano le colonne successive.
 $longestHost = ($hostStates | ForEach-Object { $_.Host.Length } | Measure-Object -Maximum).Maximum
 $hostColWidth = [Math]::Max(12, $longestHost + 2)
 $showCertColumn = ($Protocol -eq 'Https')
-$showMacColumns = [bool]$MonitorMacAddress
+$showMacColumns = [bool]$MacMonitor
 $macColWidth = 19
 $rowFormat = if ($showCertColumn) {
-    "{0,-$hostColWidth}{1,-15}{2,-16}{3,7}{4,11}{5,9}{6,10}{7,7}{8,6}{9,7}{10,9}"
+    "{0,-$hostColWidth}{1,-15}{2,7}{3,11}{4,9}{5,10}{6,7}{7,6}{8,7}{9,9}"
 } else {
-    "{0,-$hostColWidth}{1,-15}{2,-16}{3,7}{4,11}{5,9}{6,10}{7,7}{8,6}{9,7}"
+    "{0,-$hostColWidth}{1,-15}{2,7}{3,11}{4,9}{5,10}{6,7}{7,6}{8,7}"
 }
 
 function Format-DashboardRow {
     param([string]$Text)
     if ($Text.Length -ge $consoleWidth) { $Text.Substring(0, $consoleWidth) } else { $Text.PadRight($consoleWidth) }
+}
+
+function Get-SpingAutoSummaryColumns {
+    # Quante celle (nome host piu' 5 caratteri di margine) entrano nella larghezza attuale della finestra.
+    $winWidth = try { [Math]::Max(20, $Host.UI.RawUI.WindowSize.Width) } catch { 80 }
+    $cellW = $hostColWidth + 5
+    $cols = [Math]::Floor($winWidth / $cellW)
+    if ($cols -lt 1) { $cols = 1 }
+    return $cols
 }
 
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
@@ -1426,6 +1553,7 @@ Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 # (aggiornato anch'esso al toggle) non supporta testo colorato.
 $script:alertsEnabled = -not [bool]$DisableAlerts
 $script:displayFilter = $DisplayFilter
+$script:traceOnFailureEnabled = [bool]$TraceOnFailure
 $script:lastCompactHostNames = @()
 $script:lastCompactRedrawTime = $null
 $initialAlertText = if ($script:alertsEnabled) { $S.AlertsOn } else { $S.AlertsOff }
@@ -1438,17 +1566,27 @@ $initialLogColor = if ($script:loggingEnabled) { [System.ConsoleColor]::Green } 
 Write-Host (Format-DashboardRow $initialLogText) -ForegroundColor $initialLogColor
 $script:logStatusRow = 2
 
-$script:traceNoticeRow = $null
+$initialAutoTraceText = if ($script:traceOnFailureEnabled) { $S.AutoTraceOn } else { $S.AutoTraceOff }
+$initialAutoTraceColor = if ($script:traceOnFailureEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
+Write-Host (Format-DashboardRow $initialAutoTraceText) -ForegroundColor $initialAutoTraceColor
+$script:autoTraceStatusRow = 3
+
 $script:pathChangeNoticeRow = $null
 $script:pathTraceProgressRow = $null
 $script:macChangeNoticeRow = $null
-$nextNoticeRow = 3
-if ($TraceOnFailure -and -not $Summary) {
+$nextNoticeRow = 4
+if (-not $Summary) {
+    # Riservata sempre (non solo se -TraceOnFailure e' attivo all'avvio): con il tasto T si puo' accendere
+    # la traccia automatica a meta' sessione, quindi la riga deve gia' esistere quando serve.
     Write-Host (Format-DashboardRow '')
     $script:traceNoticeRow = $nextNoticeRow
     $nextNoticeRow++
+    # Stesso discorso per l'avviso dimensione log: il logging si puo' accendere a caldo con L.
+    Write-Host (Format-DashboardRow '')
+    $script:logSizeWarningRow = $nextNoticeRow
+    $nextNoticeRow++
 }
-if ($TracePathChanges -and -not $Summary) {
+if ($PathTrace -and -not $Summary) {
     Write-Host (Format-DashboardRow '')
     $script:pathChangeNoticeRow = $nextNoticeRow
     $nextNoticeRow++
@@ -1456,14 +1594,14 @@ if ($TracePathChanges -and -not $Summary) {
     $script:pathTraceProgressRow = $nextNoticeRow
     $nextNoticeRow++
 }
-if ($MonitorMacAddress -and -not $Summary) {
+if ($MacMonitor -and -not $Summary) {
     Write-Host (Format-DashboardRow '')
     $script:macChangeNoticeRow = $nextNoticeRow
     $nextNoticeRow++
 }
 
 if (-not $Summary) {
-    $neededWidth = $hostColWidth + $(if ($showCertColumn) { 97 } else { 88 }) + $(if ($showMacColumns) { ($macColWidth * $MacHistoryDepth) + 2 } else { 0 })
+    $neededWidth = $hostColWidth + $(if ($showCertColumn) { 97 } else { 88 }) + 2 + $(if ($showMacColumns) { ($macColWidth * $MacHistoryDepth) + 2 } else { 0 })
     if ($consoleWidth -lt $neededWidth) {
         $warnText = $S.WidthWarning -f $neededWidth
         if ($warnText.Length -gt $consoleWidth) { $warnText = $warnText.Substring(0, $consoleWidth) }
@@ -1491,7 +1629,7 @@ if (-not $Summary) {
 }
 
 if (-not $Summary) {
-    $headerArgs = @($S.ColHost, $S.ColIp, $S.ColStatus, $S.ColRtt, $S.ColJitter, $S.ColSent, $S.ColReceived, $S.ColLost, $S.ColLossPct, $S.ColTtlExp)
+    $headerArgs = @($S.ColHost, $S.ColIp, $S.ColRtt, $S.ColJitter, $S.ColSent, $S.ColReceived, $S.ColLost, $S.ColLossPct, $S.ColTtlExp)
     if ($showCertColumn) { $headerArgs += $S.ColCertExp }
     $macColFormat = ((0..($MacHistoryDepth - 1) | ForEach-Object { "{$_,-$macColWidth}" }) -join '')
     $headerLine = $rowFormat -f $headerArgs
@@ -1499,6 +1637,7 @@ if (-not $Summary) {
         $macHeaderArgs = @(1..$MacHistoryDepth | ForEach-Object { "$($S.ColMacPrefix)$_" })
         $headerLine += '  ' + ($macColFormat -f $macHeaderArgs)
     }
+    $headerLine += '  ' + $S.ColStatus
     Write-Host (Format-DashboardRow $headerLine) -ForegroundColor DarkGray
     Start-Sleep -Milliseconds 30   # lascia che il buffer/ConPTY si stabilizzi prima di leggere CursorTop
     $dashboardTop = [console]::CursorTop
@@ -1506,13 +1645,14 @@ if (-not $Summary) {
         $state = $hostStates[$i]
         $state | Add-Member -NotePropertyName Row -NotePropertyValue ($dashboardTop + $i) -Force
         $state.OriginalRow = $dashboardTop + $i
-        $placeholderArgs = @($state.Host, $state.ResolvedIp, $S.Waiting, '-', '-', 0, 0, 0, 0, 0)
+        $placeholderArgs = @($state.Host, $state.ResolvedIp, '-', '-', 0, 0, 0, 0, 0)
         if ($showCertColumn) { $placeholderArgs += '-' }
         $placeholderLine = $rowFormat -f $placeholderArgs
         if ($showMacColumns) {
             $macPlaceholderArgs = @(1..$MacHistoryDepth | ForEach-Object { '-' })
             $placeholderLine += '  ' + ($macColFormat -f $macPlaceholderArgs)
         }
+        $placeholderLine += '  ' + $S.Waiting
         Write-Host (Format-DashboardRow $placeholderLine)
     }
     if ($hostStates.Count -gt 40) {
@@ -1522,25 +1662,31 @@ if (-not $Summary) {
         Write-Host ($S.ManyHostsWarning -f $hostStates.Count) -ForegroundColor DarkYellow
     }
 } else {
-    # Griglia compatta: -SummaryColumns host per riga (default 4), larghezza cella basata sul nome host piu' lungo.
-    $hostsPerRow = $SummaryColumns
-    $summaryCellWidth = $hostColWidth + 5
-    $gridRows = New-Object System.Collections.Generic.List[object]
+    # Griglia compatta: -SummaryColumns host per riga (default 4, o calcolato dalla larghezza finestra se
+    # non specificato - vedi $script:summaryColumnsAuto), larghezza cella basata sul nome host piu' lungo.
+    $script:summaryCellWidth = $hostColWidth + 5
+    $script:currentSummaryColumns = if ($script:summaryColumnsAuto) { Get-SpingAutoSummaryColumns } else { $SummaryColumns }
+    $hostsPerRow = $script:currentSummaryColumns
+    $script:gridRows = New-Object System.Collections.Generic.List[object]
     for ($i = 0; $i -lt $hostStates.Count; $i += $hostsPerRow) {
         $lastIdx = [Math]::Min($i + $hostsPerRow - 1, $hostStates.Count - 1)
-        $gridRows.Add([PSCustomObject]@{ Hosts = $hostStates[$i..$lastIdx]; Row = 0 })
+        $script:gridRows.Add([PSCustomObject]@{ Hosts = $hostStates[$i..$lastIdx]; Row = 0 })
     }
     Start-Sleep -Milliseconds 30
-    $summaryTop = [console]::CursorTop
-    for ($r = 0; $r -lt $gridRows.Count; $r++) {
-        $gridRows[$r].Row = $summaryTop + $r
-        $placeholder = ($gridRows[$r].Hosts | ForEach-Object { "{0,-$hostColWidth} --  " -f $_.Host }) -join ''
+    $script:summaryTop = [console]::CursorTop
+    for ($r = 0; $r -lt $script:gridRows.Count; $r++) {
+        $script:gridRows[$r].Row = $script:summaryTop + $r
+        $placeholder = ($script:gridRows[$r].Hosts | ForEach-Object { "{0,-$hostColWidth} --  " -f $_.Host }) -join ''
         Write-Host (Format-DashboardRow $placeholder)
     }
 }
 
-$script:helpAreaRow = if ($Summary) { $summaryTop + $gridRows.Count + 1 } else { $dashboardTop + $hostStates.Count + 1 }
+$script:helpAreaRow = if ($Summary) { $script:summaryTop + $script:gridRows.Count + 1 } else { $dashboardTop + $hostStates.Count + 1 }
 $script:helpVisible = $false
+$script:logSizeWarned = $false
+$script:pendingTraceStarts = New-Object System.Collections.Generic.List[string]
+$script:lastSummaryWinWidth = try { $Host.UI.RawUI.WindowSize.Width } catch { 0 }
+$script:lastSummaryResizeTime = $null
 $script:helpLineCount = 0
 
 function Write-DashboardLine {
@@ -1573,7 +1719,7 @@ function Write-SpingHostRow {
     $lossPct = if ($State.TotalSent -gt 0) { [math]::Round(($State.TotalLost / $State.TotalSent) * 100, 1) } else { 0 }
     $rttDisplay = if ($null -ne $State.LastRtt) { $State.LastRtt } else { '-' }
     $jitterDisplay = if ($null -ne $State.Jitter) { [math]::Round($State.Jitter, 1) } else { '-' }
-    $rowArgs = @($State.Host, $State.ResolvedIp, $State.StatusText, $rttDisplay, $jitterDisplay, $State.TotalSent, $State.TotalReceived, $State.TotalLost, $lossPct, $State.TtlExpiredCount)
+    $rowArgs = @($State.Host, $State.ResolvedIp, $rttDisplay, $jitterDisplay, $State.TotalSent, $State.TotalReceived, $State.TotalLost, $lossPct, $State.TtlExpiredCount)
     if ($showCertColumn) {
         $certDisplay = '-'
         if ($State.CertExpiry) {
@@ -1583,14 +1729,18 @@ function Write-SpingHostRow {
         $rowArgs += $certDisplay
     }
     $line = $rowFormat -f $rowArgs
+    $statusColor = Get-StatusColor $State
     if (-not $showMacColumns) {
-        Write-DashboardLine -Row $State.Row -Text $line -Color (Get-StatusColor $State)
+        # STATO va in coda, senza larghezza fissa: puo' essere lungo quanto serve (es. "DestinationHostUnreachable"
+        # o con marcatori tipo "[MAC CAMBIATO]" aggiunti) senza spingere le altre colonne fuori allineamento,
+        # dato che non c'e' nulla dopo - il taglio, se serve, lo fa gia' Format-DashboardRow sull'intera riga.
+        Write-DashboardLine -Row $State.Row -Text "$line  $($State.StatusText)" -Color $statusColor
         return
     }
     # Con le colonne MAC servono colori diversi nella stessa riga (verde per il primo indirizzo visto, rosso
     # per ogni deviazione successiva): riusa Write-DashboardSegments, gia' pensata per esattamente questo.
     $segments = New-Object System.Collections.Generic.List[object]
-    $segments.Add(@{ Text = $line; Color = (Get-StatusColor $State) })
+    $segments.Add(@{ Text = $line; Color = $statusColor })
     $segments.Add(@{ Text = '  '; Color = [console]::ForegroundColor })
     for ($i = 0; $i -lt $MacHistoryDepth; $i++) {
         $cellText = if ($null -ne $State.MacHistory -and $i -lt $State.MacHistory.Count) { $State.MacHistory[$i] } else { '-' }
@@ -1598,6 +1748,7 @@ function Write-SpingHostRow {
         if ($cellText -eq '-') { $cellColor = [console]::ForegroundColor }
         $segments.Add(@{ Text = ("{0,-$macColWidth}" -f $cellText); Color = $cellColor })
     }
+    $segments.Add(@{ Text = "  $($State.StatusText)"; Color = $statusColor })
     Write-DashboardSegments -Row $State.Row -Segments $segments
 }
 
@@ -1656,8 +1807,55 @@ function Get-SpingHelpLines {
     if (-not $Summary) { $lines.Add($S.HelpFilter) }
     $lines.Add($S.HelpReset)
     $lines.Add($S.HelpLog)
+    $lines.Add($S.HelpTrace)
     $lines.Add($S.HelpHelp)
     return $lines
+}
+
+function Write-SpingSummaryGridRow {
+    param($GridRow)
+    $segments = New-Object System.Collections.Generic.List[object]
+    foreach ($state in $GridRow.Hosts) {
+        $sym = if ($state.Success) { '!!' } elseif ($state.StatusText -eq 'TtlExpired') { 'TT' } else { '..' }
+        $cellText = "{0,-$hostColWidth} {1,-2}  " -f $state.Host, $sym
+        $segments.Add(@{ Text = $cellText; Color = (Get-StatusColor $state) })
+    }
+    Write-DashboardSegments -Row $GridRow.Row -Segments $segments
+}
+
+function Update-SpingSummaryGrid {
+    # Ricostruisce la griglia -Summary da capo dopo un ridimensionamento della finestra (solo quando le
+    # colonne sono automatiche): libera le vecchie righe, ricalcola quante colonne entrano ora, riassegna le
+    # righe da $script:summaryTop (posizione fissa, mai cambiata) e ridisegna con i dati correnti degli host.
+    # Aggiorna anche $script:consoleWidth: restava fissa al valore dell'avvio, cosi' Format-DashboardRow
+    # continuava a riempire/troncare le righe per la larghezza vecchia, e il terminale le mandava a capo da
+    # solo perche' non corrispondevano piu' alla larghezza reale - causa esatta dello "sfarfallio" segnalato.
+    $script:consoleWidth = [Math]::Max(60, [console]::WindowWidth - 1)
+    $script:maxEverConsoleWidth = [Math]::Max($script:maxEverConsoleWidth, $script:consoleWidth)
+    # Cancella tutto lo spazio massimo possibile (un host per riga, il caso estremo), non solo le righe della
+    # griglia precedente: durante un trascinamento "vivo" del bordo finestra, la larghezza puo' oscillare
+    # piu' volte in rapida sequenza, e cancellare solo l'ultima griglia nota lasciava frammenti delle
+    # ricostruzioni intermedie. Usa $script:maxEverConsoleWidth (il massimo mai raggiunto, tenuto a mano) e
+    # non la larghezza del buffer in questo momento: anche il buffer stesso puo' essersi ristretto insieme
+    # alla finestra, quindi non basta piu' a garantire di coprire contenuto scritto quando era piu' largo.
+    $maxPossibleRows = $hostStates.Count
+    $fullBlank = ' ' * $script:maxEverConsoleWidth
+    for ($r = 0; $r -lt $maxPossibleRows; $r++) {
+        try { [console]::SetCursorPosition(0, $script:summaryTop + $r); [console]::Write($fullBlank) } catch { }
+    }
+    $script:currentSummaryColumns = Get-SpingAutoSummaryColumns
+    $hostsPerRow = $script:currentSummaryColumns
+    $newGridRows = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $hostStates.Count; $i += $hostsPerRow) {
+        $lastIdx = [Math]::Min($i + $hostsPerRow - 1, $hostStates.Count - 1)
+        $newGridRows.Add([PSCustomObject]@{ Hosts = $hostStates[$i..$lastIdx]; Row = 0 })
+    }
+    for ($r = 0; $r -lt $newGridRows.Count; $r++) {
+        $newGridRows[$r].Row = $script:summaryTop + $r
+    }
+    $script:gridRows = $newGridRows
+    foreach ($gridRow in $script:gridRows) { Write-SpingSummaryGridRow -GridRow $gridRow }
+    $script:helpAreaRow = $script:summaryTop + $script:gridRows.Count + 1
 }
 
 function Get-StatusColor {
@@ -1715,8 +1913,9 @@ function Update-SpingWindowTitle {
         default    { $script:S.FilterAll }
     }
     $logLabel = if ($script:loggingEnabled) { $script:S.LogOn } else { $script:S.LogOff }
+    $traceLabel = if ($script:traceOnFailureEnabled) { $script:S.AutoTraceOn } else { $script:S.AutoTraceOff }
     try {
-        $Host.UI.RawUI.WindowTitle = "Sping - $alertText | $($script:S.FilterLabel): $filterLabel | $logLabel"
+        $Host.UI.RawUI.WindowTitle = "Sping - $alertText | $($script:S.FilterLabel): $filterLabel | $logLabel | $traceLabel"
     } catch { }
 }
 
@@ -1743,7 +1942,7 @@ try {
 
         Start-SpingCycle -HostStates $hostStates -Ttl $TimeToLive -TimeoutMs $TimeoutMillis -Protocol $Protocol -Port $Port
 
-        if ($TracePathChanges) {
+        if ($PathTrace) {
             foreach ($state in $hostStates) {
                 Start-SpingPathTraceStep -State $state -MaxHops $PathTraceMaxHops -TimeoutMs $TimeoutMillis -IntervalMinutes $PathTraceIntervalMinutes
                 if ($state.PathChangedThisCycle) {
@@ -1790,7 +1989,21 @@ try {
             }
         }
 
-        if ($MonitorMacAddress) {
+        if ($script:loggingEnabled -and -not $script:logSizeWarned -and ($cycle % 20 -eq 0)) {
+            # Controllo economico ogni 20 cicli, non ad ogni ciclo - non serve precisione al secondo per un
+            # avviso di manutenzione, e risparmia una scansione della cartella ad ogni giro.
+            try {
+                $logDirSize = (Get-ChildItem -Path $LogDir -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                if ($logDirSize -gt 10MB) {
+                    $script:logSizeWarned = $true
+                    if ($null -ne $script:logSizeWarningRow) {
+                        Write-DashboardLine -Row $script:logSizeWarningRow -Text ($S.LogSizeWarning -f [Math]::Round($logDirSize / 1MB, 1)) -Color ([System.ConsoleColor]::DarkYellow)
+                    }
+                }
+            } catch { }
+        }
+
+        if ($MacMonitor) {
             foreach ($state in $hostStates) {
                 $state.MacChangedThisCycle = $false
                 if ($state.ResolvedIp -and $state.ResolvedIp -ne 'N/D') {
@@ -1857,25 +2070,8 @@ try {
                 $state.ConsecutiveFails = 0
             } else {
                 $state.TotalLost++
-                if ($TraceOnFailure -and $state.ConsecutiveFails -eq 0) {
-                    $cooldownOk = (-not $state.LastTraceTime) -or (((Get-Date) - $state.LastTraceTime).TotalMinutes -ge $TraceCooldownMinutes)
-                    if (-not $cooldownOk) {
-                        $noticeText = $S.TraceSkippedCooldown -f $state.Host
-                    } elseif ((Get-SpingActiveTraceCount) -ge $MaxConcurrentTraces) {
-                        $noticeText = $S.TraceSkippedCap -f $state.Host
-                    } else {
-                        $traceFile = Start-SpingTraceroute -TargetHost $state.Host
-                        if ($traceFile) {
-                            $state.LastTraceTime = Get-Date
-                            $script:TraceNotices += "$($state.Host) -> $traceFile"
-                            $noticeText = $S.TraceStarted -f $state.Host
-                        } else {
-                            $noticeText = $null
-                        }
-                    }
-                    if ($noticeText -and $null -ne $script:traceNoticeRow) {
-                        Write-DashboardLine -Row $script:traceNoticeRow -Text $noticeText -Color ([System.ConsoleColor]::DarkGray)
-                    }
+                if ($script:traceOnFailureEnabled -and $state.ConsecutiveFails -eq ($ResumeThreshold - 1)) {
+                    Invoke-SpingAutoTrace -State $state
                 }
                 if ($state.ConsecutiveFails -lt $ResumeThreshold) { $state.ConsecutiveFails++ }
                 if ($state.StatusText -eq 'TtlExpired') { $state.TtlExpiredCount++ }
@@ -1920,20 +2116,28 @@ try {
             }
         }
 
+        Publish-SpingPendingTraceStarts
+
         if (-not $Summary -and $script:displayFilter -ne 'All') {
             Update-SpingCompactLayout
         }
 
         if ($Summary) {
-            foreach ($gridRow in $gridRows) {
-                $segments = New-Object System.Collections.Generic.List[object]
-                foreach ($state in $gridRow.Hosts) {
-                    $sym = if ($state.Success) { '!!' } elseif ($state.StatusText -eq 'TtlExpired') { 'TT' } else { '..' }
-                    $cellText = "{0,-$hostColWidth} {1,-2}  " -f $state.Host, $sym
-                    $segments.Add(@{ Text = $cellText; Color = (Get-StatusColor $state) })
+            if ($script:summaryColumnsAuto) {
+                # Controllo economico (due interi) ad ogni ciclo; ricostruisce la griglia solo se la larghezza
+                # e' davvero cambiata E sono passati almeno 500ms dall'ultima ricostruzione, cosi' trascinare
+                # il bordo della finestra non scatena una raffica di ridisegni in rapida sequenza.
+                $currentWinWidth = try { $Host.UI.RawUI.WindowSize.Width } catch { $script:lastSummaryWinWidth }
+                if ($currentWinWidth -ne $script:lastSummaryWinWidth) {
+                    $debounceElapsed = (-not $script:lastSummaryResizeTime) -or (((Get-Date) - $script:lastSummaryResizeTime).TotalMilliseconds -ge 500)
+                    if ($debounceElapsed) {
+                        Update-SpingSummaryGrid
+                        $script:lastSummaryWinWidth = $currentWinWidth
+                        $script:lastSummaryResizeTime = Get-Date
+                    }
                 }
-                Write-DashboardSegments -Row $gridRow.Row -Segments $segments
             }
+            foreach ($gridRow in $script:gridRows) { Write-SpingSummaryGridRow -GridRow $gridRow }
         }
 
         # Wait for the interval in small chunks so Q / Ctrl+C are picked up immediately.
@@ -2010,6 +2214,27 @@ try {
                     $logStatusColor = if ($script:loggingEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
                     Write-DashboardLine -Row $script:logStatusRow -Text $logStatusText -Color $logStatusColor
                     Update-SpingWindowTitle
+                } elseif ($key.Key -eq [System.ConsoleKey]::T) {
+                    if ($hostStates.Count -gt 10) {
+                        # Attivarla a meta' sessione con molti host gia' giu' potrebbe scatenare una raffica
+                        # di tracert tutti insieme; con -TraceOnFailure impostato all'avvio invece va bene,
+                        # dato che gli host partono tutti su (nessuna raffica al primo ciclo).
+                        if ($null -ne $script:traceNoticeRow) {
+                            Write-DashboardLine -Row $script:traceNoticeRow -Text ($script:S.TraceToggleTooManyHosts -f $hostStates.Count) -Color ([System.ConsoleColor]::DarkYellow)
+                        }
+                    } else {
+                        $script:traceOnFailureEnabled = -not $script:traceOnFailureEnabled
+                        $traceStatusText = if ($script:traceOnFailureEnabled) { $script:S.AutoTraceOn } else { $script:S.AutoTraceOff }
+                        $traceStatusColor = if ($script:traceOnFailureEnabled) { [System.ConsoleColor]::Green } else { [System.ConsoleColor]::Red }
+                        Write-DashboardLine -Row $script:autoTraceStatusRow -Text $traceStatusText -Color $traceStatusColor
+                        Update-SpingWindowTitle
+                        if ($script:traceOnFailureEnabled) {
+                            foreach ($tState in $hostStates) {
+                                if (-not $tState.Success -and $tState.ConsecutiveFails -ge $ResumeThreshold) { Invoke-SpingAutoTrace -State $tState }
+                            }
+                            Publish-SpingPendingTraceStarts
+                        }
+                    }
                 } elseif ($key.Key -eq [System.ConsoleKey]::H) {
                     $script:helpVisible = -not $script:helpVisible
                     $helpLines = Get-SpingHelpLines

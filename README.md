@@ -32,6 +32,8 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1
 ```
 
+On first run, the script offers to add its folder to the Windows user PATH (requires explicit Y/N confirmation): if you accept, you'll be able to run `sping` from any folder without specifying the full path. A new PowerShell window is needed for the change to take effect.
+
 ## Usage
 
 ```powershell
@@ -45,7 +47,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ListName Core -Domain contoso.local -Summary -Log
 
 # HTTP/HTTPS ping instead of ICMP (useful when ICMP is filtered but the web service is what matters)
-.\Sping.ps1 www.contoso.local -Protocol Https -IgnoreCertificateErrors
+.\Sping.ps1 www.contoso.local -Protocol Https -CertIgnoreErrors
 
 # TCP port check (e.g. a database listening on a specific port)
 .\Sping.ps1 db-server-01 -Protocol Tcp -Port 1433
@@ -60,13 +62,13 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 db-server-01 web-server-02 -TraceOnFailure -Log
 
 # Flag if the network path to a host changes, checked every 30 minutes
-.\Sping.ps1 vpn-remoto.contoso.local -TracePathChanges -PathTraceIntervalMinutes 30
+.\Sping.ps1 vpn-remoto.contoso.local -PathTrace -PathTraceIntervalMinutes 30
 
 # Show only unreachable hosts (F to cycle the filter live during monitoring)
 .\Sping.ps1 -ListName Core -DisplayFilter DownOnly
 
 # Flag MAC address changes (IP conflict) - only for hosts on the same local network
-.\Sping.ps1 192.168.1.1 192.168.1.254 -MonitorMacAddress -MacHistoryDepth 4 -Log
+.\Sping.ps1 192.168.1.1 192.168.1.254 -MacMonitor -MacHistoryDepth 4 -Log
 
 # Keep logs tidy: delete files older than 30 days at startup (saved as a setting)
 .\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
@@ -87,29 +89,31 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Sping.ps1 -ShowSettings
 ```
 
-While monitoring, press `H` at any time to show/hide a panel listing every available command (`A` for alerts, `F` for the host filter, `R` to reset counters, `L` to toggle logging on or off without restarting the session, `Q`/`Ctrl+C` to stop cleanly). A final summary is always printed, with no terminating errors.
+While monitoring, press `H` at any time to show/hide a panel listing every available command (`A` for alerts, `F` for the host filter, `R` to reset counters, `L` to toggle logging, `T` to toggle automatic trace-on-failure without restarting the session, `Q`/`Ctrl+C` to stop cleanly). A final summary is always printed, with no terminating errors.
 
 ## Main parameters
+
+*In v2.20.0 four parameters were renamed for consistency (`-MonitorMacAddress`→`-MacMonitor`, `-TracePathChanges`→`-PathTrace`, `-MaxConcurrentTraces`→`-TraceMaxConcurrent`, `-IgnoreCertificateErrors`→`-CertIgnoreErrors`): the old names are no longer valid, update any scripts or scheduled tasks that use them.*
 
 | Parameter | Description |
 |---|---|
 | `ComputerName` (positional) | One or more hosts/IPs to ping in parallel. Each entry also accepts a range/CIDR/subnet mask (e.g. `10.0.0.0/23`, `10.0.0.1-10.0.0.50`, `10.0.0.1-50`), automatically expanded into multiple hosts |
 | `-MaxRangeHosts` | Safety cap on how many hosts a single range/CIDR can generate (default 1024), to avoid accidentally monitoring thousands of hosts from an overly broad range |
-| `-TraceOnFailure` | When a host's consecutive-failure count goes from 0 to 1 (the start of a new down episode), runs `tracert -d -h 20 -w 1000` for that host as an independent background process (does not block the dashboard), saving its output to a timestamped file under `SpingData\traces`. Fires once per episode, not on every failed cycle. A notice on dashboard row 1 shows the latest trace started or skipped |
+| `-TraceOnFailure` | When a host's consecutive-failure count reaches `-ResumeThreshold` (confirmed down, not on the very first packet loss), runs `tracert -d -h 20 -w 1000` for that host as an independent background process (does not block the dashboard), saving its output to a timestamped file under `SpingData\traces`. Fires once per episode. A notice shows the hosts a trace just started for, grouped on the same line if more than one at once. Can also be toggled live with the `T` key (10 hosts or fewer only) |
 | `-TraceCooldownMinutes` | Only with `-TraceOnFailure`: minimum minutes between two traceroutes for the same host, to avoid re-tracing a flapping host on every episode (default 10) |
-| `-MaxConcurrentTraces` | Only with `-TraceOnFailure`: cap on how many `tracert` processes can run at once across all hosts, to avoid exhausting resources when many hosts fail together (e.g. a broad CIDR range) (default 5) |
-| `-TracePathChanges` | Periodically re-traces the route to every host (independent of the ping cycle and of `-TraceOnFailure`) with a native, non-blocking probe spread across several cycles, flagging it if the route differs from the previous trace. A dedicated dashboard row shows the trace live (host, current hop, IPs discovered so far) or a countdown to the next one. Full before/after detail is saved to a file under `SpingData\pathtraces` |
-| `-PathTraceIntervalMinutes` | Only with `-TracePathChanges`: minutes between the end of one completed trace and the start of the next, per host (default 15) |
-| `-PathTraceMaxHops` | Only with `-TracePathChanges`: maximum hops to probe before giving up on reaching the destination (default 20) |
+| `-TraceMaxConcurrent` | Only with `-TraceOnFailure`: cap on how many `tracert` processes can run at once across all hosts, to avoid exhausting resources when many hosts fail together (e.g. a broad CIDR range) (default 5) |
+| `-PathTrace` | Periodically re-traces the route to every host (independent of the ping cycle and of `-TraceOnFailure`) with a native, non-blocking probe spread across several cycles, flagging it if the route differs from the previous trace. A dedicated dashboard row shows the trace live (host, current hop, IPs discovered so far) or a countdown to the next one. Full before/after detail is saved to a file under `SpingData\pathtraces` |
+| `-PathTraceIntervalMinutes` | Only with `-PathTrace`: minutes between the end of one completed trace and the start of the next, per host (default 15) |
+| `-PathTraceMaxHops` | Only with `-PathTrace`: maximum hops to probe before giving up on reaching the destination (default 20) |
 | `-DisplayFilter` | Which hosts to show in the dashboard: `All` (default), `UpOnly` (reachable only), `DownOnly` (unreachable only). With `UpOnly`/`DownOnly` the view is compact (no gaps), redrawn when the set changes, with a debounce equal to `ResumeThreshold` x `IntervalMillis` to avoid flicker on unstable networks. Cycle live with the `F` key during monitoring (All -> Up only -> Down only -> All). Not available in `-Summary` mode |
-| `-MonitorMacAddress` | Reads each host's MAC address from Windows' own neighbor table (`Get-NetNeighbor`, already correctly populated by the ping itself), instead of forcing a fresh ARP resolution that on multi-adapter PCs (VMware, VPN) can pick the wrong interface. Adds MAC1..MACn columns to the dashboard: MAC1 is the first address seen (green), each later distinct one fills the next column (red), flagging a deviation (possible IP conflict, replaced device, or ARP spoofing). Only works for hosts on the same local network segment, so this is not useful for hosts reachable only over a WAN. Every change is still fully logged to a file under `SpingData\macchanges` |
-| `-MacHistoryDepth` | Only with `-MonitorMacAddress`: how many MAC1..MACn columns to show in the dashboard, reserved once at startup (default 3), never added mid-session to avoid recomputing the layout while running |
+| `-MacMonitor` | Reads each host's MAC address from Windows' own neighbor table (`Get-NetNeighbor`, already correctly populated by the ping itself), instead of forcing a fresh ARP resolution that on multi-adapter PCs (VMware, VPN) can pick the wrong interface. Adds MAC1..MACn columns to the dashboard: MAC1 is the first address seen (green), each later distinct one fills the next column (red), flagging a deviation (possible IP conflict, replaced device, or ARP spoofing). Only works for hosts on the same local network segment, so this is not useful for hosts reachable only over a WAN. Every change is still fully logged to a file under `SpingData\macchanges` |
+| `-MacHistoryDepth` | Only with `-MacMonitor`: how many MAC1..MACn columns to show in the dashboard, reserved once at startup (default 3), never added mid-session to avoid recomputing the layout while running |
 | `-ListName` | Name of a saved host list (can be combined with `ComputerName`) |
 | `-Domain` | DNS suffix appended to every host |
 | `-Count` | Number of ping cycles (default: continuous) |
 | `-Protocol` | `Icmp` (default), `Http`, `Https`, or `Tcp`: with Http/Https each cycle sends a parallel web request, with Tcp a connection attempt to `-Port`, instead of an ICMP ping |
 | `-Port` | Destination TCP port. Required with `-Protocol Tcp` |
-| `-IgnoreCertificateErrors` | Only with `-Protocol Https`: skips TLS certificate validation (useful for internal hosts with self-signed certificates) |
+| `-CertIgnoreErrors` | Only with `-Protocol Https`: skips TLS certificate validation (useful for internal hosts with self-signed certificates) |
 | `-CertWarningDays` | Only with `-Protocol Https`: day threshold below which the STATUS column flags an upcoming certificate expiry (default 30) |
 | `-Language` | UI language: `en` or `it`. Default: auto-detected from the system's UI language on first run (Italian if the system is in Italian, English otherwise), then whatever was last saved. Customizable and extensible, see the Language section |
 | `-DisableAlerts` | Starts with the sound/voice alert disabled instead of the default enabled (can still be toggled live with the `A` key). Persist with `-SaveAsDefault` to always start disabled |
@@ -118,12 +122,12 @@ While monitoring, press `H` at any time to show/hide a panel listing every avail
 | `-IntervalMillis` | Pause in ms between cycles. With `-Protocol Http`/`Https`/`Tcp` a minimum of 3000 ms is enforced, even if you request a lower value, to avoid resembling a flood/DDoS against the monitored hosts |
 | `-ResumeThreshold` | Consecutive failures after which the row switches from orange to red, and below which the sound alert fires on recovery |
 | `-Summary` | Compact grid instead of one row per host, see `-SummaryColumns` |
-| `-SummaryColumns` | Only with `-Summary`: hosts per row in the compact grid (default 4) |
+| `-SummaryColumns` | Only with `-Summary`: hosts per row in the compact grid. If not specified (neither here nor as a saved default), it's auto-computed from the window width, also adapting live during the session on resize |
 | `-SoundFile` | WAV file played when a host recovers |
 | `-Log` / `-LogFile` | Enable logging (default or custom path). Can also be toggled live during monitoring with the `L` key, without restarting the session |
 | `-LogFormat` | `Csv` (default) or `Json`: the latter writes one compact JSON object per line (JSON Lines/NDJSON), suitable for ingestion by SIEM/monitoring tools, with more fields than the CSV (protocol, jitter, certificate days-to-expiry) |
-| `-LogRetentionDays` | If set, deletes files older than N days at startup (not during the session) from every `SpingData` subfolder that accumulates files over time (logs, traces, pathtraces, macchanges). Disabled by default: nothing is ever deleted unless this is explicitly set |
-| `-SaveAsDefault` | Save this run's parameters as the new defaults |
+| `-LogRetentionDays` | If set, deletes files older than N days at startup (not during the session) from every `SpingData` subfolder that accumulates files over time (logs, traces, pathtraces, macchanges). Disabled by default: nothing is ever deleted unless this is explicitly set. Regardless of this setting, an on-screen warning flags it if the log folder exceeds 10 MB |
+| `-SaveAsDefault` | Save this run's parameters as the new defaults. Used alone, with no host, saves and exits without starting monitoring |
 | `-ShowSettings` / `-ShowLists` | Show saved settings/lists and exit |
 | `-SaveList` / `-RemoveList` | Save or delete a host list under `-ListName` |
 
@@ -154,7 +158,7 @@ The UI starts in Italian if the system is in Italian, otherwise in English (auto
 
 ## Route change detection
 
-`-TracePathChanges` periodically traces the network path (hop by hop) to every host and flags it if the path differs from the previous trace. Useful for noticing a failover to a backup link, a routing reconvergence, or unexpected routing. The probe is native (no external process), non-blocking (one hop per cycle, spread across several cycles) and completely separate from `-TraceOnFailure`.
+`-PathTrace` periodically traces the network path (hop by hop) to every host and flags it if the path differs from the previous trace. Useful for noticing a failover to a backup link, a routing reconvergence, or unexpected routing. The probe is native (no external process), non-blocking (one hop per cycle, spread across several cycles) and completely separate from `-TraceOnFailure`.
 
 **Watch out for load-balanced networks (ECMP)**: if your network routes different packets of the same flow over slightly different paths (common with multiple WAN links in a load-balancing setup), you may see warnings even with no real issue. The feature compares the full hop list: any difference, even a single hop with the same path length, triggers the alert.
 
