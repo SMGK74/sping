@@ -1,0 +1,201 @@
+*🇬🇧 English | [🇮🇹 Versione italiana](README.it.md)*
+
+[![PSScriptAnalyzer](https://github.com/SMGK74/sping/actions/workflows/psscriptanalyzer.yml/badge.svg)](https://github.com/SMGK74/sping/actions/workflows/psscriptanalyzer.yml)
+
+# Sping
+
+Parallel multi-host ping monitor for PowerShell, a modern rewrite of the old `Sping.vbs`.
+
+Shows a live console dashboard (one fixed row per host, updated in place - no flicker, no scrolling), optionally writes a structured CSV log, and plays a sound/voice alert when a host that was down comes back up.
+
+## History
+
+Sping started out as `Sping.vbs`, an old VBScript tool for pinging multiple hosts, with a sound alert on recovery and settings stored in the Windows Registry. This version is a full PowerShell rewrite that keeps the original goal (a simple, lightweight, dependency-free monitor) while iteratively adding: a live color-coded dashboard, CSV logging, portable JSON configuration, support for multiple protocols (ICMP, HTTP/HTTPS, TCP), jitter and TLS certificate expiry monitoring, UI localization, CIDR/range expansion, and automatic traceroute on failure. Developed with the assistance of Claude (Anthropic).
+
+## Requirements
+
+- Windows PowerShell 5.1 or later (`#Requires -Version 5.1`)
+- No external dependencies: uses only `System.Net.NetworkInformation.Ping`, `System.Net.Dns`, `System.Media.SoundPlayer` and `System.Speech.Synthesis`, all already present in .NET Framework on Windows
+
+## Installing on a new PC
+
+```powershell
+# 1. Copy Sping.ps1 to a folder of your choice
+
+# 2. Unblock the file (needed if downloaded from the internet/email/chat)
+Unblock-File -Path .\Sping.ps1
+
+# 3. Allow local scripts to run (once per user/PC)
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+# 4. Run
+.\Sping.ps1
+```
+
+On first run, the script offers to add its folder to the Windows user PATH (requires explicit Y/N confirmation): if you accept, you'll be able to run `sping` from any folder without specifying the full path. A new PowerShell window is needed for the change to take effect.
+
+## Usage
+
+```powershell
+# Full help (also shown by running the script with no parameters)
+.\Sping.ps1 -Help
+
+# Ping multiple hosts in parallel
+.\Sping.ps1 192.168.1.1 web-server-01 10.0.0.5 -Count 50 -TimeoutMillis 500
+
+# Saved list + DNS suffix + compact mode + CSV log
+.\Sping.ps1 -ListName Core -Domain contoso.local -Summary -Log
+
+# HTTP/HTTPS ping instead of ICMP (useful when ICMP is filtered but the web service is what matters)
+.\Sping.ps1 www.contoso.local -Protocol Https -CertIgnoreErrors
+
+# TCP port check (e.g. a database listening on a specific port)
+.\Sping.ps1 db-server-01 -Protocol Tcp -Port 1433
+
+# Range/CIDR/subnet mask: each entry expands into multiple hosts (network and broadcast excluded)
+.\Sping.ps1 10.0.0.0/23 -Summary
+.\Sping.ps1 10.0.0.1-10.0.0.50
+.\Sping.ps1 10.0.0.1-50
+.\Sping.ps1 10.0.0.0/255.255.254.0
+
+# Automatic traceroute on the first failure of each "down" episode (independent background process)
+.\Sping.ps1 db-server-01 web-server-02 -TraceOnFailure -Log
+
+# Flag if the network path to a host changes, checked every 30 minutes
+.\Sping.ps1 vpn-remoto.contoso.local -PathTrace -PathTraceIntervalMinutes 30
+
+# Show only unreachable hosts (F to cycle the filter live during monitoring)
+.\Sping.ps1 -ListName Core -DisplayFilter DownOnly
+
+# Flag MAC address changes (IP conflict) - only for hosts on the same local network
+.\Sping.ps1 192.168.1.1 192.168.1.254 -MacMonitor -MacHistoryDepth 4 -Log
+
+# Keep logs tidy: delete files older than 30 days at startup (saved as a setting)
+.\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
+
+# Italian UI (default: English)
+.\Sping.ps1 -ListName Core -Language it
+
+# JSON Lines logging instead of CSV, for a SIEM or monitoring tool
+.\Sping.ps1 -ListName Core -Log -LogFormat Json
+
+# Start with the sound alert disabled
+.\Sping.ps1 -ListName Core -DisableAlerts
+
+# Save a host list for future reuse
+.\Sping.ps1 10.0.0.1 10.0.0.2 -ListName Core -SaveList
+
+# View current default settings
+.\Sping.ps1 -ShowSettings
+```
+
+While monitoring, press `H` at any time to show/hide a panel listing every available command (`A` for alerts, `F` for the host filter, `R` to reset counters, `L` to toggle logging, `T` to toggle automatic trace-on-failure without restarting the session, `Q`/`Ctrl+C` to stop cleanly). A final summary is always printed, with no terminating errors.
+
+## Main parameters
+
+*In v2.20.0 four parameters were renamed for consistency (`-MonitorMacAddress`→`-MacMonitor`, `-TracePathChanges`→`-PathTrace`, `-MaxConcurrentTraces`→`-TraceMaxConcurrent`, `-IgnoreCertificateErrors`→`-CertIgnoreErrors`): the old names are no longer valid, update any scripts or scheduled tasks that use them.*
+
+| Parameter | Description |
+|---|---|
+| `ComputerName` (positional) | One or more hosts/IPs to ping in parallel. Each entry also accepts a range/CIDR/subnet mask (e.g. `10.0.0.0/23`, `10.0.0.1-10.0.0.50`, `10.0.0.1-50`), automatically expanded into multiple hosts |
+| `-MaxRangeHosts` | Safety cap on how many hosts a single range/CIDR can generate (default 1024), to avoid accidentally monitoring thousands of hosts from an overly broad range |
+| `-TraceOnFailure` | When a host's consecutive-failure count reaches `-ResumeThreshold` (confirmed down, not on the very first packet loss), runs `tracert -d -h 20 -w 1000` for that host as an independent background process (does not block the dashboard), saving its output to a timestamped file under `SpingData\traces`. Fires once per episode. A notice shows the hosts a trace just started for, grouped on the same line if more than one at once. Can also be toggled live with the `T` key (10 hosts or fewer only) |
+| `-TraceCooldownMinutes` | Only with `-TraceOnFailure`: minimum minutes between two traceroutes for the same host, to avoid re-tracing a flapping host on every episode (default 10) |
+| `-TraceMaxConcurrent` | Only with `-TraceOnFailure`: cap on how many `tracert` processes can run at once across all hosts, to avoid exhausting resources when many hosts fail together (e.g. a broad CIDR range) (default 5) |
+| `-PathTrace` | Periodically re-traces the route to every host (independent of the ping cycle and of `-TraceOnFailure`) with a native, non-blocking probe spread across several cycles, flagging it if the route differs from the previous trace. A dedicated dashboard row shows the trace live (host, current hop, IPs discovered so far) or a countdown to the next one. Full before/after detail is saved to a file under `SpingData\pathtraces` |
+| `-PathTraceIntervalMinutes` | Only with `-PathTrace`: minutes between the end of one completed trace and the start of the next, per host (default 15) |
+| `-PathTraceMaxHops` | Only with `-PathTrace`: maximum hops to probe before giving up on reaching the destination (default 20) |
+| `-DisplayFilter` | Which hosts to show in the dashboard: `All` (default), `UpOnly` (reachable only), `DownOnly` (unreachable only). With `UpOnly`/`DownOnly` the view is compact (no gaps), redrawn when the set changes, with a debounce equal to `ResumeThreshold` x `IntervalMillis` to avoid flicker on unstable networks. Cycle live with the `F` key during monitoring (All -> Up only -> Down only -> All). Not available in `-Summary` mode |
+| `-MacMonitor` | Reads each host's MAC address from Windows' own neighbor table (`Get-NetNeighbor`, already correctly populated by the ping itself), instead of forcing a fresh ARP resolution that on multi-adapter PCs (VMware, VPN) can pick the wrong interface. Adds MAC1..MACn columns to the dashboard: MAC1 is the first address seen (green), each later distinct one fills the next column (red), flagging a deviation (possible IP conflict, replaced device, or ARP spoofing). Only works for hosts on the same local network segment, so this is not useful for hosts reachable only over a WAN. Every change is still fully logged to a file under `SpingData\macchanges` |
+| `-MacHistoryDepth` | Only with `-MacMonitor`: how many MAC1..MACn columns to show in the dashboard, reserved once at startup (default 3), never added mid-session to avoid recomputing the layout while running |
+| `-ListName` | Name of a saved host list (can be combined with `ComputerName`) |
+| `-Domain` | DNS suffix appended to every host |
+| `-Count` | Number of ping cycles (default: continuous) |
+| `-Protocol` | `Icmp` (default), `Http`, `Https`, or `Tcp`: with Http/Https each cycle sends a parallel web request, with Tcp a connection attempt to `-Port`, instead of an ICMP ping |
+| `-Port` | Destination TCP port. Required with `-Protocol Tcp` |
+| `-CertIgnoreErrors` | Only with `-Protocol Https`: skips TLS certificate validation (useful for internal hosts with self-signed certificates) |
+| `-CertWarningDays` | Only with `-Protocol Https`: day threshold below which the STATUS column flags an upcoming certificate expiry (default 30) |
+| `-Language` | UI language: `en` or `it`. Default: auto-detected from the system's UI language on first run (Italian if the system is in Italian, English otherwise), then whatever was last saved. Customizable and extensible, see the Language section |
+| `-DisableAlerts` | Starts with the sound/voice alert disabled instead of the default enabled (can still be toggled live with the `A` key). Persist with `-SaveAsDefault` to always start disabled |
+| `-TimeToLive` | TTL of ping packets (`-Protocol Icmp` only) |
+| `-TimeoutMillis` | Timeout in ms to wait for each reply |
+| `-IntervalMillis` | Pause in ms between cycles. With `-Protocol Http`/`Https`/`Tcp` a minimum of 3000 ms is enforced, even if you request a lower value, to avoid resembling a flood/DDoS against the monitored hosts |
+| `-ResumeThreshold` | Consecutive failures after which the row switches from orange to red, and below which the sound alert fires on recovery |
+| `-Summary` | Compact grid instead of one row per host. Columns per row are always auto-computed from the current window width, also adapting live during the session on resize |
+| `-SoundFile` | WAV file played when a host recovers |
+| `-Log` / `-LogFile` | Enable logging (default or custom path). Can also be toggled live during monitoring with the `L` key, without restarting the session |
+| `-LogFormat` | `Csv` (default) or `Json`: the latter writes one compact JSON object per line (JSON Lines/NDJSON), suitable for ingestion by SIEM/monitoring tools, with more fields than the CSV (protocol, jitter, certificate days-to-expiry) |
+| `-LogRetentionDays` | If set, deletes files older than N days at startup (not during the session) from every `SpingData` subfolder that accumulates files over time (logs, traces, pathtraces, macchanges). Disabled by default: nothing is ever deleted unless this is explicitly set. Regardless of this setting, an on-screen warning flags it if the log folder exceeds 10 MB |
+| `-SaveAsDefault` | Save this run's parameters as the new defaults. Used alone, with no host, saves and exits without starting monitoring |
+| `-ShowSettings` / `-ShowLists` | Show saved settings/lists (with any comment) and exit |
+| `-SaveList` / `-RemoveList` | Save or delete a host list under `-ListName`. Hosts come from `-ComputerName` or `-ImportFile` (one or the other, not both) |
+| `-ImportFile` | Only with `-SaveList`: path to a CSV to read hosts from instead of `-ComputerName`. Required column `Host` (one IP/range/CIDR per row); optional columns `ListName` (to import several lists from the same file in one pass - omit `-ListName` on the command line in that case) and `Comment` (per-list description, first non-empty value found wins). Comma or semicolon delimiter, auto-detected |
+| `-ListComment` | Only with `-SaveList` (outside bulk CSV import): free-text description saved with the list, shown by `-ShowLists`. If omitted while updating an existing list, its current comment is kept |
+
+## Configuration and portability
+
+Settings, host lists, logs and language files persist as JSON, no longer in the Windows Registry as in the original VBScript version. The storage folder is chosen automatically:
+
+1. **`SpingData` next to the script** (e.g. `C:\Tools\SpingData`), if that location is writable. This makes the whole `Sping` folder portable: copy it to another PC or a USB drive and settings/lists/logs travel along with the script.
+2. **`%APPDATA%\SM-Script\Sping`** as a fallback, if the script is in a non-writable location (e.g. `Program Files` or a read-only share).
+
+## Language
+
+The UI starts in Italian if the system is in Italian, otherwise in English (auto-detected on first run). Use `-Language it`/`-Language en` to force it explicitly. On first run, the script generates `en.json` and `it.json` under `SpingData\lang\`: edit them, or copy one as a base to create a new one (e.g. `fr.json` with the same keys) to add another language, then call it with `-Language fr`.
+
+`en.json`/`it.json` are stamped with the script version that generated them. When you update the script, if that version differs from the existing file, it is automatically regenerated with the latest text (and you're notified on screen). Any manual customization made in that file needs to be redone after a script update - a language file for another language (e.g. `fr.json`) is never touched automatically, since there's no built-in text to compare it against.
+
+## Dashboard colors
+
+- **Green**: ping succeeded
+- **Orange**: ping failed, below the `-ResumeThreshold` consecutive-failure threshold
+- **Red**: consecutive failures at or beyond `-ResumeThreshold`
+- **Yellow**: the FQDN doesn't resolve (takes priority over all other colors)
+
+## Jitter and certificate expiry
+
+- **JITTER(ms)**: a moving average of the variation between consecutive RTTs (same formula as RFC 3550/1889), shown in the dashboard and the final summary. Useful for spotting unstable links even when packet loss is low.
+- **Certificate expiry** (`-Protocol Https`): at startup, once per host (not every cycle, to avoid adding load beyond the monitoring itself), the TLS certificate's expiry date is read. The CERT(d) column shows the remaining days (negative if already expired), with a `!` when it falls within `-CertWarningDays` days (default 30).
+
+## Route change detection
+
+`-PathTrace` periodically traces the network path (hop by hop) to every host and flags it if the path differs from the previous trace. Useful for noticing a failover to a backup link, a routing reconvergence, or unexpected routing. The probe is native (no external process), non-blocking (one hop per cycle, spread across several cycles) and completely separate from `-TraceOnFailure`.
+
+**Watch out for load-balanced networks (ECMP)**: if your network routes different packets of the same flow over slightly different paths (common with multiple WAN links in a load-balancing setup), you may see warnings even with no real issue. The feature compares the full hop list: any difference, even a single hop with the same path length, triggers the alert.
+
+## Importing lists from CSV
+
+`-ImportFile` reads hosts from a CSV file instead of typing them on the command line, in two modes:
+
+**Single** (one file -> one list, requires `-ListName`):
+```csv
+Host
+10.1.1.1
+10.1.1.2
+10.1.1.0/24
+```
+```powershell
+.\Sping.ps1 -ListName "North Sites" -ImportFile .\north_sites.csv -ListComment "North Italy routers" -SaveList
+```
+
+**Bulk** (one file -> several lists at once, `ListName` column present, omit `-ListName` on the command line):
+```csv
+ListName,Host,Comment
+North Sites,10.1.1.1,North Italy routers
+North Sites,10.1.1.2,
+South Sites,10.2.2.1,South Italy routers
+South Sites,10.2.2.2,
+```
+```powershell
+.\Sping.ps1 -ImportFile .\all_sites.csv -SaveList
+```
+
+The comment only needs to be written once per list (the first row of that group is enough), not on every row. Extra columns in the CSV are ignored, so you can point straight at a file you already use for something else without cleaning it up first.
+
+## Console compatibility notes
+
+On consoles with a small vertical buffer (typical of the classic "Windows PowerShell"/conhost on some PCs, unlike Windows Terminal) the script explicitly forces a buffer height large enough to hold the banner, header, and all host rows, to prevent automatic scrolling from renumbering rows and breaking the dashboard.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).

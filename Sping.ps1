@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Sping v2.22.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
+    Sping v2.23.0 - Advanced multi-host ping monitor (PowerShell rewrite of the original Sping.vbs).
 
 .DESCRIPTION
     Pings one or more hosts IN PARALLEL every cycle, showing a live dashboard in the console
@@ -176,10 +176,27 @@
     Show all saved host lists and exit.
 
 .PARAMETER SaveList
-    Save -ComputerName under -ListName for future reuse, then exit.
+    Save the host source under -ListName for future reuse, then exit. Host source is either
+    -ComputerName or -ImportFile (exactly one - using both is an error). With -ImportFile, if the
+    CSV has a ListName column, -ListName must be omitted: every distinct value in that column
+    becomes its own saved list in one pass (bulk import), and -ListComment is ignored in favor of
+    the CSV's own optional Comment column (first non-empty value per list wins). Without a
+    ListName column, -ListName is required and the CSV's Host column becomes that one list.
 
 .PARAMETER RemoveList
     Delete the host list named by -ListName, then exit.
+
+.PARAMETER ImportFile
+    Only relevant with -SaveList. Path to a CSV file to read hosts from instead of -ComputerName.
+    Delimiter (comma or semicolon) is auto-detected. Required column: Host (one entry per row -
+    IP, hostname, range, or CIDR, same syntax as -ComputerName). Optional columns: ListName (for
+    bulk import of several lists from one file - see -SaveList) and Comment (per-list
+    description, only meaningful alongside ListName). Extra columns are ignored.
+
+.PARAMETER ListComment
+    Only relevant with -SaveList (and only when not bulk-importing several lists from one CSV -
+    see -ImportFile). Free-text description saved alongside the list, shown by -ShowLists. If
+    omitted while updating an existing list, its current comment is kept.
 
 .PARAMETER Help
     Show this full help and exit. Also shown automatically if the script is run with no parameters at all.
@@ -216,6 +233,12 @@
 
 .EXAMPLE
     .\Sping.ps1 -ListName Core -Log -LogRetentionDays 30 -SaveAsDefault
+
+.EXAMPLE
+    .\Sping.ps1 -ListName "Sedi Nord" -ImportFile .\sedi_nord.csv -ListComment "Router sedi Nord Italia" -SaveList
+
+.EXAMPLE
+    .\Sping.ps1 -ImportFile .\tutte_le_sedi.csv -SaveList
 
 .EXAMPLE
     .\Sping.ps1 -ShowSettings -Language it
@@ -276,6 +299,8 @@ param(
     [switch]$ShowLists,
     [switch]$SaveList,
     [switch]$RemoveList,
+    [string]$ImportFile,
+    [string]$ListComment,
     [switch]$Help
 )
 
@@ -286,7 +311,7 @@ if ($Help -or $PSBoundParameters.Count -eq 0) {
     return
 }
 
-$script:ScriptVersion = '2.22.0'
+$script:ScriptVersion = '2.23.0'
 Write-Host "Sping v$ScriptVersion" -ForegroundColor DarkCyan
 
 #region Paths & config -------------------------------------------------------
@@ -388,6 +413,22 @@ function Save-SpingLists {
     $Lists | ConvertTo-Json | Set-Content -Path $ListsFile -Encoding UTF8
 }
 
+function Get-SpingListHosts {
+    # Le liste salvate da versioni precedenti sono un semplice array di host; quelle nuove sono un oggetto
+    # {Hosts, Comment}. Questa funzione legge entrambi i formati allo stesso modo, cosi' le liste vecchie
+    # continuano a funzionare senza bisogno di una migrazione esplicita.
+    param($ListValue)
+    if ($null -eq $ListValue) { return @() }
+    if ($ListValue.PSObject.Properties.Name -contains 'Hosts') { return @($ListValue.Hosts) }
+    return @($ListValue)
+}
+
+function Get-SpingListComment {
+    param($ListValue)
+    if ($ListValue -and $ListValue.PSObject.Properties.Name -contains 'Comment') { return $ListValue.Comment }
+    return ''
+}
+
 # Stringhe integrate (fallback garantito, e base per generare i file lingua al primo avvio).
 # L'inglese e' il default; l'italiano e le altre lingue sono file JSON in SpingData\lang, liberamente
 # personalizzabili o duplicabili per aggiungerne di nuove (basta un file <codice>.json con le stesse chiavi).
@@ -403,6 +444,13 @@ $script:BuiltInStrings = @{
         ListRemoved           = "List '{0}' removed."
         ListNotExist          = "List '{0}' does not exist."
         ListNotExistIgnored   = "List '{0}' does not exist, it will be ignored."
+        ImportFileConflictComputerName = "-ImportFile and -ComputerName can't be used together - the hosts would come from two different places."
+        ImportFileNeedsSaveList = "-ImportFile is only meaningful together with -SaveList."
+        ImportFileConflictListName = "This CSV has a ListName column (bulk import): omit -ListName, it's read from the file for each list."
+        ImportFileNotFound    = "File not found: {0}"
+        ImportFileReadError   = "Could not read '{0}': {1}"
+        ImportFileNoHosts     = "No usable rows found in '{0}' (missing or empty Host column?)."
+        ListsImported         = "{0} list(s) imported from {1}."
         SettingsSaved         = "Settings saved as default."
         NoHostsError           = "No hosts to ping. Specify -ComputerName and/or -ListName. Use -ShowLists to see saved lists."
         HttpIntervalWarning   = "With -Protocol {0} the minimum interval is {1}ms to avoid overloading the monitored hosts (requested: {2}ms)."
@@ -481,6 +529,13 @@ $script:BuiltInStrings = @{
         ListRemoved           = "Lista '{0}' rimossa."
         ListNotExist          = "La lista '{0}' non esiste."
         ListNotExistIgnored   = "La lista '{0}' non esiste, verra' ignorata."
+        ImportFileConflictComputerName = "-ImportFile e -ComputerName non si possono usare insieme: gli host arriverebbero da due posti diversi."
+        ImportFileNeedsSaveList = "-ImportFile ha senso solo insieme a -SaveList."
+        ImportFileConflictListName = "Questo CSV ha una colonna ListName (import massivo): non specificare -ListName, viene letto dal file per ogni lista."
+        ImportFileNotFound    = "File non trovato: {0}"
+        ImportFileReadError   = "Impossibile leggere '{0}': {1}"
+        ImportFileNoHosts     = "Nessuna riga utilizzabile trovata in '{0}' (colonna Host mancante o vuota?)."
+        ListsImported         = "{0} liste importate da {1}."
         SettingsSaved         = "Impostazioni salvate come default."
         NoHostsError           = "Nessun host da pingare. Specifica -ComputerName e/o -ListName. Usa -ShowLists per vedere le liste salvate."
         HttpIntervalWarning   = "Con -Protocol {0} l'intervallo minimo e' {1}ms per non rischiare di sovraccaricare gli host monitorati (richiesto: {2}ms)."
@@ -618,6 +673,10 @@ $script:S = Get-SpingStrings -Language $Language
 
 #region Handlers for the "utility" parameter sets ----------------------------
 
+if ($ImportFile -and -not $SaveList) {
+    throw $S.ImportFileNeedsSaveList
+}
+
 if ($ShowSettings) {
     Write-Host ("`n" + ($S.CurrentSettingsHeader -f $ConfigFile)) -ForegroundColor Cyan
     $cfg | Format-List | Out-String | Write-Host
@@ -632,13 +691,79 @@ if ($ShowLists) {
     } else {
         Write-Host ("`n" + ($S.SavedListsHeader -f $ListsFile)) -ForegroundColor Cyan
         foreach ($n in $names) {
-            Write-Host ("  {0}: {1}" -f $n, ($lists.$n -join ', '))
+            $hostsForDisplay = Get-SpingListHosts -ListValue $lists.$n
+            $commentForDisplay = Get-SpingListComment -ListValue $lists.$n
+            $line = "  {0}: {1}" -f $n, ($hostsForDisplay -join ', ')
+            if ($commentForDisplay) { $line += "  [$commentForDisplay]" }
+            Write-Host $line
         }
     }
     return
 }
 
 if ($SaveList) {
+    if ($ImportFile -and $ComputerName -and $ComputerName.Count -gt 0) {
+        throw $S.ImportFileConflictComputerName
+    }
+    if ($ImportFile) {
+        # Auto-rileva il separatore: virgola o punto e virgola (Excel in italiano usa quest'ultimo, dato
+        # che la virgola serve per i decimali). Riconosciuto valido solo se produce davvero una colonna Host.
+        if (-not (Test-Path $ImportFile)) { throw ($S.ImportFileNotFound -f $ImportFile) }
+        $csvRows = $null
+        foreach ($delim in @(',', ';')) {
+            try {
+                $attempt = Import-Csv -Path $ImportFile -Delimiter $delim -ErrorAction Stop
+                if ($attempt | Get-Member -Name 'Host' -ErrorAction SilentlyContinue) {
+                    $csvRows = $attempt
+                    break
+                }
+            } catch { }
+        }
+        if (-not $csvRows) {
+            throw ($S.ImportFileReadError -f $ImportFile, "colonna 'Host' non trovata (provati sia virgola sia punto e virgola come separatore)")
+        }
+        $hasListNameColumn = [bool]($csvRows | Get-Member -Name 'ListName' -ErrorAction SilentlyContinue)
+        if ($hasListNameColumn) {
+            # Import massivo: ogni valore distinto di ListName diventa una lista propria in un solo passaggio.
+            if ($ListName) { throw $S.ImportFileConflictListName }
+            $lists = Get-SpingLists
+            $grouped = $csvRows | Where-Object { $_.Host -and $_.ListName } | Group-Object -Property ListName
+            if ($grouped.Count -eq 0) { throw ($S.ImportFileNoHosts -f $ImportFile) }
+            foreach ($group in $grouped) {
+                $hostsForList = @($group.Group | ForEach-Object { $_.Host } | Where-Object { $_ })
+                if ($hostsForList.Count -eq 0) { continue }
+                $existingComment = ''
+                if ($lists.PSObject.Properties.Name -contains $group.Name) {
+                    $existingComment = Get-SpingListComment -ListValue $lists.($group.Name)
+                }
+                # Primo commento non vuoto per quel nome di lista vince; non serve ripeterlo su ogni riga.
+                $csvComment = ($group.Group | Where-Object { $_.PSObject.Properties.Name -contains 'Comment' -and $_.Comment } | Select-Object -First 1).Comment
+                $finalComment = if ($csvComment) { $csvComment } else { $existingComment }
+                $entry = [pscustomobject]@{ Hosts = $hostsForList; Comment = $finalComment }
+                $lists | Add-Member -NotePropertyName $group.Name -NotePropertyValue $entry -Force
+            }
+            Save-SpingLists -Lists $lists
+            Write-Host ($S.ListsImported -f $grouped.Count, $ImportFile) -ForegroundColor Green
+            return
+        } else {
+            # Import singolo: tutte le righe del CSV finiscono nella lista indicata da -ListName.
+            if (-not $ListName) { throw $S.SpecifyListNameSave }
+            $hostsFromCsv = @($csvRows | Where-Object { $_.Host } | ForEach-Object { $_.Host })
+            if ($hostsFromCsv.Count -eq 0) { throw ($S.ImportFileNoHosts -f $ImportFile) }
+            $lists = Get-SpingLists
+            $existingComment = ''
+            if ($lists.PSObject.Properties.Name -contains $ListName) {
+                $existingComment = Get-SpingListComment -ListValue $lists.$ListName
+            }
+            $finalComment = if ($PSBoundParameters.ContainsKey('ListComment')) { $ListComment } else { $existingComment }
+            $entry = [pscustomobject]@{ Hosts = $hostsFromCsv; Comment = $finalComment }
+            $lists | Add-Member -NotePropertyName $ListName -NotePropertyValue $entry -Force
+            Save-SpingLists -Lists $lists
+            Write-Host ($S.ListSaved -f $ListName, $hostsFromCsv.Count) -ForegroundColor Green
+            return
+        }
+    }
+    # Percorso tradizionale: host passati con -ComputerName invece che da file.
     if (-not $ListName) {
         throw $S.SpecifyListNameSave
     }
@@ -646,7 +771,13 @@ if ($SaveList) {
         throw ($S.SpecifyHostForList -f $ListName)
     }
     $lists = Get-SpingLists
-    $lists | Add-Member -NotePropertyName $ListName -NotePropertyValue $ComputerName -Force
+    $existingComment = ''
+    if ($lists.PSObject.Properties.Name -contains $ListName) {
+        $existingComment = Get-SpingListComment -ListValue $lists.$ListName
+    }
+    $finalComment = if ($PSBoundParameters.ContainsKey('ListComment')) { $ListComment } else { $existingComment }
+    $entry = [pscustomobject]@{ Hosts = $ComputerName; Comment = $finalComment }
+    $lists | Add-Member -NotePropertyName $ListName -NotePropertyValue $entry -Force
     Save-SpingLists -Lists $lists
     Write-Host ($S.ListSaved -f $ListName, $ComputerName.Count) -ForegroundColor Green
     return
@@ -836,7 +967,7 @@ if ($ComputerName) { $rawTargets.AddRange([string[]]$ComputerName) }
 if ($ListName) {
     $lists = Get-SpingLists
     if ($lists.PSObject.Properties.Name -contains $ListName) {
-        $rawTargets.AddRange([string[]]$lists.$ListName)
+        $rawTargets.AddRange([string[]](Get-SpingListHosts -ListValue $lists.$ListName))
     } else {
         Write-Warning ($S.ListNotExistIgnored -f $ListName)
     }
